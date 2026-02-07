@@ -52,29 +52,23 @@ class VertexService:
         output_gcs_uri = f"gs://{self.bucket_name}/videos/"
         image_mime = _infer_mime_type(image_data)
         ref_images = []
-        for idx, ref_img in enumerate((character_images or [])[:MAX_VEO_REFERENCE_IMAGES], start=1):
+        for ref_img in (character_images or [])[:MAX_VEO_REFERENCE_IMAGES]:
             ref_images.append(
                 {
-                    "reference_id": f"person_{idx}",
-                    "reference_type": "SUBJECT",
-                    "reference_image": Image(
+                    "image": Image(
                         image_bytes=ref_img,
                         mime_type=_infer_mime_type(ref_img),
                     ),
+                    "reference_type": "ASSET",
                 }
             )
 
         final_prompt = prompt
         if ref_images:
-            id_lines = "\n".join(
-                f"- {ref['reference_id']}: keep this exact person's face identity."
-                for ref in ref_images
-            )
             final_prompt = (
                 f"{prompt}\n\n"
                 "REFERENCE SUBJECTS:\n"
-                f"{id_lines}\n"
-                "Use all referenced subjects as distinct primary characters. "
+                "- Keep referenced people as distinct primary characters.\n"
                 "Do not blend identities or swap faces."
             )
 
