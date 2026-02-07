@@ -259,15 +259,6 @@ class JobService:
                     if u.strip()
                 ]
             reference_image_urls = [u for u in raw_reference_urls if u][:MAX_REFERENCE_IMAGES]
-            if not source_image_url:
-                raise ValueError("source_image_url is required")
-
-            # Fetch source image if URL provided
-            source_image = await fetch_image_from_url(source_image_url)
-            if not source_image:
-                raise ValueError("source_image_url could not be fetched as an image")
-            print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
-
             reference_images: list[bytes] = []
             if reference_image_urls:
                 print(f"[{jid}] Fetching {len(reference_image_urls)} reference image(s)...", flush=True)
@@ -277,10 +268,22 @@ class JobService:
                     f"[{jid}] Loaded {len(reference_images)}/{len(reference_image_urls)} reference image(s)",
                     flush=True,
                 )
+            source_image = None
+            if source_image_url:
+                source_image = await fetch_image_from_url(source_image_url)
+                if source_image:
+                    print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
+                else:
+                    print(f"[{jid}] source_image_url could not be fetched; continuing without source image", flush=True)
+            if not source_image and not reference_images:
+                raise ValueError("At least one valid source image or reference image is required")
+            if source_image and reference_images:
+                print(f"[{jid}] Both source and reference images supplied; Veo request will use reference-image mode", flush=True)
 
             image_uri = ""
-            if self.bucket:
-                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, source_image)
+            preview_image = source_image or (reference_images[0] if reference_images else None)
+            if self.bucket and preview_image:
+                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, preview_image)
 
             veo_prompt = create_video_prompt(
                 title=title,
@@ -289,7 +292,7 @@ class JobService:
             )
             operation = await self.vertex_service.generate_video_content(
                 prompt=veo_prompt,
-                image_data=source_image,
+                image_data=None if reference_images else source_image,
                 duration_seconds=duration,
                 reference_images=reference_images if reference_images else None,
             )

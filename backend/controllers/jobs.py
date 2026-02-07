@@ -86,17 +86,18 @@ class Jobs(APIController):
         outcome = (payload.get("outcome") or "").strip()
         original_bet_link = (payload.get("original_bet_link") or "").strip()
         source_image_url = (payload.get("source_image_url") or "").strip()
+        reference_image_urls = payload.get("reference_image_urls") or []
 
         log_api("/create", f"Title: {title[:50]}...")
         log_api("/create", f"Outcome: {outcome[:50]}...")
         log_api("/create", f"Bet link: {original_bet_link}")
 
-        if not title or not outcome or not original_bet_link or not source_image_url:
+        if not title or not outcome or not original_bet_link or (not source_image_url and not reference_image_urls):
             log_api("/create", "ERROR: Missing required fields")
             return json(
                 {
                     "error": (
-                        "title, outcome, original_bet_link, and source_image_url are required"
+                        "title, outcome, and original_bet_link are required; provide source_image_url or reference_image_urls"
                     )
                 },
                 status=400,
@@ -106,14 +107,13 @@ class Jobs(APIController):
             duration_seconds = int(payload.get("duration_seconds", 6))
         except Exception:
             duration_seconds = 6
-        reference_image_urls = payload.get("reference_image_urls") or []
 
         job_request = VideoJobRequest(
             title=title,
             outcome=outcome,
             original_bet_link=original_bet_link,
             duration_seconds=max(5, min(duration_seconds, 8)),
-            source_image_url=source_image_url,
+            source_image_url=source_image_url or None,
             reference_image_urls=reference_image_urls[:3],
         )
 

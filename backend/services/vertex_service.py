@@ -38,7 +38,7 @@ class VertexService:
     async def generate_video_content(
         self,
         prompt: str,
-        image_data: bytes,
+        image_data: bytes | None,
         duration_seconds: int = 8,
         reference_images: list[bytes] | None = None,
     ) -> GenerateVideosOperation:
@@ -54,11 +54,11 @@ class VertexService:
                     "reference_type": "ASSET",
                 }
             )
-        logger.info(
-            f"Calling Veo preview with source image ({len(image_data)} bytes) "
-            f"and {len(ref_payload)} reference image(s)"
-        )
-        image_mime = _infer_mime_type(image_data)
+        use_reference_mode = bool(ref_payload)
+        if use_reference_mode and image_data is not None:
+            logger.warning("Both source image and reference images were provided; using reference-image mode only.")
+        if not use_reference_mode and image_data is None:
+            raise ValueError("Either image_data or reference_images must be provided")
         config_kwargs = {
             "aspect_ratio": "9:16",
             "duration_seconds": duration_seconds,
@@ -79,22 +79,24 @@ class VertexService:
             config_kwargs.pop("resolution", None)
             config = GenerateVideosConfig(**config_kwargs)
 
-        try:
+        if use_reference_mode:
             operation = self.client.models.generate_videos(
                 model="veo-3.1-generate-preview",
                 prompt=prompt,
-                image=Image(
-                    image_bytes=image_data,
-                    mime_type=image_mime,
-                ),
                 config=config,
             )
-        except Exception as exc:
-            if ref_payload:
-                raise RuntimeError(
-                    f"Veo request failed while using source image + reference images: {exc}"
-                ) from exc
-            raise
+            return operation
+
+        image_mime = _infer_mime_type(image_data)
+        operation = self.client.models.generate_videos(
+            model="veo-3.1-generate-preview",
+            prompt=prompt,
+            image=Image(
+                image_bytes=image_data,
+                mime_type=image_mime,
+            ),
+            config=config,
+        )
         return operation
     
     async def get_video_status(self, operation: GenerateVideosOperation) -> JobStatus:
