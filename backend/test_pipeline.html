@@ -145,7 +145,7 @@
             <textarea
                 id="outcome"
                 required
-            >Seattle Seahawks</textarea>
+            >Seattle Seahawks Wins against the New England Patriots</textarea>
         </div>
 
         <div class="form-group">
@@ -170,11 +170,10 @@
         </div>
 
         <div class="form-group">
-            <label for="shortsStyle">Shorts Style</label>
+            <label for="shortsStyle">Style</label>
             <select id="shortsStyle">
-                <option value="action_commentary" selected>Action + Commentary (no music)</option>
-                <option value="vibe_music_edit">Vibe Music Edit (music only)</option>
-                <option value="fantasy_ai_gen">Fantasy AI-Gen Art (orchestral ambient)</option>
+                <option value="action" selected>Action (Realistic/Sports)</option>
+                <option value="animated">Animated (2D/Stylized)</option>
             </select>
         </div>
 
@@ -200,17 +199,6 @@ https://a.espncdn.com/i/headshots/nfl/players/full/3912547.png</textarea>
             <small style="color: #666;">Use direct public image URLs only (JPG/PNG/WebP), one per line. Avoid Google search-result page URLs. When character images are provided, Veo preview reference mode is used (8s, 16:9).</small>
         </div>
 
-        <div class="form-group">
-            <label for="characterQueries">Character Queries (optional - resolver terms, one per line)</label>
-            <textarea
-                id="characterQueries"
-                placeholder="tiger
-sam darnold headshot
-stormtrooper concept art"
-                style="min-height: 60px;"
-            ></textarea>
-            <small style="color: #666;">Used when you don’t have direct URLs. Resolver runs in parallel and prioritizes accurate assets.</small>
-        </div>
 
         <button type="submit" id="submitBtn">Start Job</button>
         <button type="button" id="stopBtn" disabled>Stop Polling</button>
@@ -302,10 +290,6 @@ stormtrooper concept art"
             const characterImageUrls = charUrlsRaw
                 ? charUrlsRaw.split(/[,\n]/).map(u => u.trim()).filter(u => u)
                 : [];
-            const characterQueriesRaw = document.getElementById('characterQueries').value.trim();
-            const characterQueries = characterQueriesRaw
-                ? characterQueriesRaw.split(/[,\n]/).map(q => q.trim()).filter(q => q)
-                : [];
 
             submitBtn.disabled = true;
             stopBtn.disabled = false;
@@ -330,9 +314,6 @@ stormtrooper concept art"
             if (characterImageUrls.length > 0) {
                 log(`Character images: ${characterImageUrls.length} URL(s)`, 'info');
             }
-            if (characterQueries.length > 0) {
-                log(`Character queries: ${characterQueries.join(' | ')}`, 'info');
-            }
 
             try {
                 log('Sending POST to /api/jobs/create...', 'info');
@@ -348,8 +329,7 @@ stormtrooper concept art"
                         duration_seconds: duration,
                         shorts_style: shortsStyle,
                         source_image_url: sourceImageUrl,
-                        character_image_urls: characterImageUrls,
-                        character_queries: characterQueries
+                        character_image_urls: characterImageUrls
                     })
                 });
 

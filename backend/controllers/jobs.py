@@ -40,37 +40,24 @@ class Jobs(APIController):
             or payload.get("characterImageUrls")
             or payload.get("reference_image_urls")
             or payload.get("referenceImageUrls")
-            or payload.get("additional_image_urls")
-            or payload.get("additionalImageUrls")
-        )
-        char_queries = self._coerce_list(
-            payload.get("character_queries")
-            or payload.get("characterQueries")
-            or payload.get("character_terms")
-            or payload.get("characterTerms")
         )
 
         return {
             "title": payload.get("title"),
-            # New schema uses "outcome"; keep "caption" as backward-compatible fallback.
             "outcome": payload.get("outcome") or payload.get("caption"),
             "original_bet_link": (
                 payload.get("original_bet_link")
                 or payload.get("originalBetLink")
-                or payload.get("originla_bet_link")
                 or payload.get("bet_link")
-                or payload.get("bet")
             ),
             "duration_seconds": payload.get("duration_seconds", 8),
             "shorts_style": (
                 payload.get("shorts_style")
                 or payload.get("shortsStyle")
                 or payload.get("style")
-                or payload.get("format")
             ),
             "source_image_url": payload.get("source_image_url") or payload.get("sourceImageUrl"),
             "character_image_urls": char_urls,
-            "character_queries": char_queries,
         }
 
     @post("/create")
@@ -129,11 +116,7 @@ class Jobs(APIController):
         shorts_style = normalize_shorts_style(payload.get("shorts_style"))
         source_image_url = (payload.get("source_image_url") or "").strip() or None
         character_image_urls = [u for u in payload.get("character_image_urls", []) if u]
-        character_queries = [q for q in payload.get("character_queries", []) if q]
-        log_api("/create", f"Shorts style: {shorts_style}")
-        log_api("/create", f"Character image URLs: {len(character_image_urls)}")
-        if character_queries:
-            log_api("/create", f"Character queries: {character_queries}")
+        log_api("/create", f"Style: {shorts_style}, Character images: {len(character_image_urls)}")
 
         job_request = VideoJobRequest(
             title=title,
@@ -143,7 +126,6 @@ class Jobs(APIController):
             shorts_style=shorts_style,
             source_image_url=source_image_url,
             character_image_urls=character_image_urls,
-            character_queries=character_queries,
         )
 
         log_api("/create", f"Creating video job (duration={job_request.duration_seconds}s)...")

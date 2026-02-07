@@ -9,10 +9,10 @@ class VideoJobRequest:
     outcome: str
     original_bet_link: str
     duration_seconds: int = 8
-    shorts_style: str = "action_commentary"
-    source_image_url: Optional[str] = None  # Optional real image to use as base
-    character_image_urls: list[str] = field(default_factory=list)  # Character/headshot/sprite references
-    character_queries: list[str] = field(default_factory=list)  # Search terms (e.g., "tiger", "sam darnold headshot")
+    shorts_style: str = "action"  # "action" or "animated"
+    source_image_url: Optional[str] = None  # Optional image to use as base
+    character_image_urls: list[str] = field(default_factory=list)  # Character headshot URLs
+    
 @dataclass
 class JobStatus:
     status: Optional[Literal["done", "waiting", "error"]]

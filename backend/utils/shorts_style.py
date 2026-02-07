@@ -1,26 +1,32 @@
 from typing import Literal
 
-ShortsStyle = Literal["action_commentary", "vibe_music_edit", "fantasy_ai_gen"]
+Style = Literal["action", "animated"]
+DEFAULT_STYLE: Style = "action"
 
-DEFAULT_SHORTS_STYLE: ShortsStyle = "action_commentary"
+_STYLE_ALIASES: dict[str, Style] = {
+    # Action/realistic
+    "action": "action",
+    "action_commentary": "action",
+    "realistic": "action",
+    "sports": "action",
 
-_SHORTS_STYLE_ALIASES: dict[str, ShortsStyle] = {
-    "action": "action_commentary",
-    "action_commentary": "action_commentary",
-    "action-commentary": "action_commentary",
-    "vibe_music_edit": "vibe_music_edit",
-    "vibe-music-edit": "vibe_music_edit",
-    "music_edit": "vibe_music_edit",
-    "music": "vibe_music_edit",
-    "edit": "vibe_music_edit",
-    "fantasy_ai_gen": "fantasy_ai_gen",
-    "fantasy-ai-gen": "fantasy_ai_gen",
-    "fantasy": "fantasy_ai_gen",
-    "aigen": "fantasy_ai_gen",
-    "ai_gen": "fantasy_ai_gen",
+    # Animated/stylized
+    "animated": "animated",
+    "animation": "animated",
+    "2d": "animated",
+    "fantasy": "animated",
+    "fantasy_ai_gen": "animated",
+    "vibe_music_edit": "animated",
+    "stylized": "animated",
 }
 
 
-def normalize_shorts_style(style: str | None) -> ShortsStyle:
+def normalize_style(style: str | None) -> Style:
+    """Normalize style input to 'action' or 'animated'."""
     normalized = (style or "").strip().lower()
-    return _SHORTS_STYLE_ALIASES.get(normalized, DEFAULT_SHORTS_STYLE)
+    return _STYLE_ALIASES.get(normalized, DEFAULT_STYLE)
+
+
+# Keep old name for backward compatibility
+def normalize_shorts_style(style: str | None) -> Style:
+    return normalize_style(style)
