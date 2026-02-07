@@ -31,5 +31,4 @@ class JobStatus:
     video_url: Optional[str] = None
     error: Optional[str] = None
     original_bet_link: Optional[str] = None
-    image1_url: Optional[str] = None
-    image2_url: Optional[str] = None
+    image_url: Optional[str] = None

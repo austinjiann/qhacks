@@ -188,17 +188,12 @@
     </div>
 
     <div id="imagesContainer" style="display: none;">
-        <h3>Gemini Generated Images</h3>
+        <h3>Gemini Generated Start Frame</h3>
         <div class="images-container">
             <div class="image-box">
-                <h4>Image 1 (Start Frame)</h4>
-                <div id="image1Placeholder" class="placeholder">Waiting...</div>
-                <img id="image1" style="display: none;" alt="Generated Image 1">
-            </div>
-            <div class="image-box">
-                <h4>Image 2 (End Frame)</h4>
-                <div id="image2Placeholder" class="placeholder">Waiting...</div>
-                <img id="image2" style="display: none;" alt="Generated Image 2">
+                <h4>Start Frame</h4>
+                <div id="imagePlaceholder" class="placeholder">Waiting...</div>
+                <img id="generatedImage" style="display: none;" alt="Generated Start Frame">
             </div>
         </div>
     </div>
@@ -218,17 +213,14 @@
         const statusText = document.getElementById('statusText');
         const jobIdSpan = document.getElementById('jobId');
         const imagesContainer = document.getElementById('imagesContainer');
-        const image1 = document.getElementById('image1');
-        const image1Placeholder = document.getElementById('image1Placeholder');
-        const image2 = document.getElementById('image2');
-        const image2Placeholder = document.getElementById('image2Placeholder');
+        const generatedImage = document.getElementById('generatedImage');
+        const imagePlaceholder = document.getElementById('imagePlaceholder');
         const videoContainer = document.getElementById('videoContainer');
         const videoPlayer = document.getElementById('videoPlayer');
         const logDiv = document.getElementById('log');
 
         let pollInterval = null;
-        let image1Loaded = false;
-        let image2Loaded = false;
+        let imageLoaded = false;
 
         function log(message, type = '') {
             const entry = document.createElement('div');
@@ -276,16 +268,12 @@
             statusDiv.className = '';
             videoContainer.style.display = 'none';
 
-            // Reset images
+            // Reset image
             imagesContainer.style.display = 'block';
-            image1.style.display = 'none';
-            image1Placeholder.style.display = 'flex';
-            image1Placeholder.textContent = 'Generating...';
-            image2.style.display = 'none';
-            image2Placeholder.style.display = 'flex';
-            image2Placeholder.textContent = 'Waiting...';
-            image1Loaded = false;
-            image2Loaded = false;
+            generatedImage.style.display = 'none';
+            imagePlaceholder.style.display = 'flex';
+            imagePlaceholder.textContent = 'Generating...';
+            imageLoaded = false;
             pollCount = 0;
 
             log('========== NEW JOB SUBMISSION ==========', 'info');
@@ -357,38 +345,21 @@
 
                 statusText.textContent = data.status;
 
-                // Display images as they become available
-                if (data.image1_url && !image1Loaded) {
-                    log(`Image 1 URL received: ${data.image1_url.substring(0, 80)}...`, 'success');
-                    image1.src = data.image1_url;
-                    image1.onload = () => {
-                        log('Image 1 loaded successfully!', 'success');
-                        image1.style.display = 'block';
-                        image1Placeholder.style.display = 'none';
+                // Display image when available
+                if (data.image_url && !imageLoaded) {
+                    log(`Start frame URL received: ${data.image_url.substring(0, 80)}...`, 'success');
+                    generatedImage.src = data.image_url;
+                    generatedImage.onload = () => {
+                        log('Start frame loaded successfully!', 'success');
+                        generatedImage.style.display = 'block';
+                        imagePlaceholder.style.display = 'none';
                     };
-                    image1.onerror = (e) => {
-                        log(`Image 1 failed to load: ${e}`, 'error');
-                        image1Placeholder.textContent = 'Failed to load';
-                        image1Placeholder.style.color = '#ff4757';
+                    generatedImage.onerror = (e) => {
+                        log(`Start frame failed to load: ${e}`, 'error');
+                        imagePlaceholder.textContent = 'Failed to load';
+                        imagePlaceholder.style.color = '#ff4757';
                     };
-                    image1Loaded = true;
-                    image2Placeholder.textContent = 'Generating...';
-                }
-
-                if (data.image2_url && !image2Loaded) {
-                    log(`Image 2 URL received: ${data.image2_url.substring(0, 80)}...`, 'success');
-                    image2.src = data.image2_url;
-                    image2.onload = () => {
-                        log('Image 2 loaded successfully!', 'success');
-                        image2.style.display = 'block';
-                        image2Placeholder.style.display = 'none';
-                    };
-                    image2.onerror = (e) => {
-                        log(`Image 2 failed to load: ${e}`, 'error');
-                        image2Placeholder.textContent = 'Failed to load';
-                        image2Placeholder.style.color = '#ff4757';
-                    };
-                    image2Loaded = true;
+                    imageLoaded = true;
                 }
 
                 if (data.status === 'done') {

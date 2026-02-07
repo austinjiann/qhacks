@@ -141,14 +141,11 @@ class Jobs(APIController):
             "video_url": status.video_url,
             "error": status.error,
             "original_bet_link": status.original_bet_link,
-            "image1_url": status.image1_url,
-            "image2_url": status.image2_url,
+            "image_url": status.image_url,
         }
         logger.debug(f"Job {job_id} status response: status={status.status}")
-        if status.image1_url:
-            logger.info(f"Job {job_id} has image1_url")
-        if status.image2_url:
-            logger.info(f"Job {job_id} has image2_url")
+        if status.image_url:
+            logger.info(f"Job {job_id} has image_url")
         if status.status == "done":
             logger.info(f"Job {job_id} DONE, video_url={status.video_url}")
         return json(response_data)

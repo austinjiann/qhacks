@@ -4,19 +4,17 @@ def create_video_prompt(
     original_bet_link: str,
 ) -> str:
     """
-    Build a Veo prompt that creates logical motion between start and end frames.
+    Build a Veo prompt that animates forward from the first frame.
     """
-    return f"""Create a smooth, logical transition from the first frame to the last frame.
+    return f"""Animate this image into an exciting 8-second action clip.
 
 ACTION: {caption}
 
 RULES:
-- Motion must be physically realistic and logical
-- Objects and people stay consistent (no disappearing helmets, no teleporting)
-- Forward motion only - balls thrown forward, people move forward
-- Can use cinematic cuts/transitions if needed to connect the scenes
-- Think like a movie director editing a highlight reel
+- Continue the motion naturally from this starting frame
+- Physically realistic movement
+- Forward motion, building energy
+- Professional sports broadcast style
+- Cinematic, dynamic camera work
 
-STYLE: Professional sports broadcast, cinematic, high energy
-
-Connect these two frames with exciting but LOGICAL action."""
+Make it exciting and action-packed."""

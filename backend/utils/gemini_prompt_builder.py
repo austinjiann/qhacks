@@ -24,21 +24,3 @@ def create_first_image_prompt(
     )
 
 
-def create_second_image_prompt(
-    title: str,
-    caption: str,
-    original_bet_link: str,
-) -> str:
-    """
-    Build a second-frame prompt conditioned on the first frame image.
-    """
-    return "\n".join(
-        [
-            _base_style_prompt(),
-            f"Title context: {title}",
-            f"Scene context: {caption}",
-            f"Bet context link: {original_bet_link}",
-            "Using the provided first frame as reference, create a coherent ending keyframe.",
-            "Keep the same subjects and setting but show progression and stronger motion cues.",
-        ]
-    )

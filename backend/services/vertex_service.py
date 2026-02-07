@@ -25,14 +25,7 @@ class VertexService:
         self.bucket_name = settings.GOOGLE_CLOUD_BUCKET_NAME
         logger.info(f"VertexService initialized, output bucket: {self.bucket_name}")
 
-    async def generate_video_content(self, prompt: str, image_data: bytes = None, ending_image_data: bytes = None, duration_seconds: int = 6) -> GenerateVideosOperation:
-        ending_frame = None
-        if ending_image_data:
-            ending_frame = Image(
-                image_bytes=ending_image_data,
-                mime_type="image/png",
-            )
-
+    async def generate_video_content(self, prompt: str, image_data: bytes, duration_seconds: int = 8) -> GenerateVideosOperation:
         output_gcs_uri = f"gs://{self.bucket_name}/videos/"
         operation = self.client.models.generate_videos(
             model="veo-3.1-fast-generate-001",
@@ -45,8 +38,7 @@ class VertexService:
                 aspect_ratio="9:16",
                 duration_seconds=duration_seconds,
                 output_gcs_uri=output_gcs_uri,
-                negative_prompt="text, captions, subtitles, annotations, low quality, static, ugly, weird physics",
-                last_frame=ending_frame,
+                negative_prompt="text, captions, subtitles, annotations, low quality, static, ugly, weird physics, backwards motion",
             ),
         )
         return operation

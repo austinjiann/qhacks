@@ -11,10 +11,7 @@ from google.cloud import storage
 from models.job import JobStatus, VideoJobRequest
 from services.vertex_service import VertexService
 from utils.env import settings
-from utils.gemini_prompt_builder import (
-    create_first_image_prompt,
-    create_second_image_prompt,
-)
+from utils.gemini_prompt_builder import create_first_image_prompt
 from utils.veo_prompt_builder import create_video_prompt
 
 logger = logging.getLogger("job_service")
@@ -227,7 +224,7 @@ class JobService:
         return job_id
 
     async def process_video_job(self, job_id: str, job_data: dict):
-        """Process pipeline: source_image -> frame1 -> frame2 -> video"""
+        """Process pipeline: source_image -> first_frame -> video"""
         jid = job_id[:8]
         start_time = datetime.now().isoformat()
         existing_job = await self._load_job(job_id)
@@ -246,34 +243,22 @@ class JobService:
                 if source_image:
                     print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
 
-            # Step 1: Generate first frame (from source image if available)
+            # Generate first frame (from source image if available)
             first_prompt = create_first_image_prompt(title=title, caption=caption, original_bet_link=original_bet_link)
             first_image = await self.vertex_service.generate_image_from_prompt(
                 prompt=first_prompt,
-                image=source_image  # Use source image as base if available
+                image=source_image
             )
 
-            image1_uri = ""
+            image_uri = ""
             if self.bucket:
-                image1_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, first_image)
+                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, first_image)
 
-            # Step 2: Generate second frame (transform first frame into climax)
-            second_prompt = create_second_image_prompt(title=title, caption=caption, original_bet_link=original_bet_link)
-            second_image = await self.vertex_service.generate_image_from_prompt(
-                prompt=second_prompt,
-                image=first_image
-            )
-
-            image2_uri = ""
-            if self.bucket:
-                image2_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 2, second_image)
-
-            # Step 3: Generate video
+            # Generate video from first frame (Veo decides what happens next)
             veo_prompt = create_video_prompt(title=title, caption=caption, original_bet_link=original_bet_link)
             operation = await self.vertex_service.generate_video_content(
                 prompt=veo_prompt,
                 image_data=first_image,
-                ending_image_data=second_image,
                 duration_seconds=duration,
             )
 
@@ -285,8 +270,7 @@ class JobService:
                 "caption": caption,
                 "original_bet_link": original_bet_link,
                 "duration_seconds": duration,
-                "image1_uri": image1_uri,
-                "image2_uri": image2_uri,
+                "image_uri": image_uri,
             })
             print(f"[{jid}] Video processing started", flush=True)
 
@@ -302,130 +286,58 @@ class JobService:
                 "duration_seconds": int(job_data.get("duration_seconds", 8)),
             })
 
-    def _get_image_signed_urls(self, job: dict) -> tuple[Optional[str], Optional[str]]:
-        """Generate signed URLs for the intermediate images."""
-        image1_url = None
-        image2_url = None
-
-        image1_uri = job.get("image1_uri")
-        image2_uri = job.get("image2_uri")
-
-        if image1_uri:
-            image1_url = self._generate_signed_url(image1_uri)
-            logger.debug(f"Generated signed URL for image1: {image1_url[:50] if image1_url else None}...")
-
-        if image2_uri:
-            image2_url = self._generate_signed_url(image2_uri)
-            logger.debug(f"Generated signed URL for image2: {image2_url[:50] if image2_url else None}...")
-
-        return image1_url, image2_url
+    def _get_image_signed_url(self, job: dict) -> Optional[str]:
+        """Generate signed URL for the start frame image."""
+        image_uri = job.get("image_uri")
+        if image_uri:
+            return self._generate_signed_url(image_uri)
+        return None
 
     async def get_job_status(self, job_id: str) -> Optional[JobStatus]:
-        """
-        Poll job status.
-        For processing jobs, poll Vertex operation and cache final output URL.
-        """
-        logger.debug(f"[{job_id}] get_job_status called")
+        """Poll job status."""
         job = await self._load_job(job_id, prefer_remote=bool(self.bucket))
         if job is None:
-            logger.warning(f"[{job_id}] Job not found in memory or GCS")
             return None
 
         status = job.get("status")
         job_start_time = self._parse_timestamp(job.get("job_start_time"))
         job_end_time = self._parse_timestamp(job.get("job_end_time"))
         original_bet_link = job.get("original_bet_link")
-        logger.debug(f"[{job_id}] Current status: {status}")
-
-        # Get signed URLs for images (available after processing starts)
-        image1_url, image2_url = self._get_image_signed_urls(job)
+        image_url = self._get_image_signed_url(job)
 
         if status in ("pending", "queued"):
-            logger.debug(f"[{job_id}] Returning waiting status (pending/queued)")
-            return JobStatus(
-                status="waiting",
-                job_start_time=job_start_time,
-                original_bet_link=original_bet_link,
-                image1_url=image1_url,
-                image2_url=image2_url,
-            )
+            return JobStatus(status="waiting", job_start_time=job_start_time, original_bet_link=original_bet_link, image_url=image_url)
 
         if status == "error":
-            logger.debug(f"[{job_id}] Returning error status: {job.get('error')}")
-            return JobStatus(
-                status="error",
-                job_start_time=job_start_time,
-                job_end_time=job_end_time,
-                error=job.get("error"),
-                original_bet_link=original_bet_link,
-                image1_url=image1_url,
-                image2_url=image2_url,
-            )
+            return JobStatus(status="error", job_start_time=job_start_time, job_end_time=job_end_time, error=job.get("error"), original_bet_link=original_bet_link, image_url=image_url)
 
         if status == "done":
-            # Generate signed URL for video if we have the raw URI stored
             video_url = job.get("video_url")
-            video_uri = job.get("video_uri")  # Raw gs:// URI
+            video_uri = job.get("video_uri")
             if video_uri:
                 video_url = self._generate_signed_url(video_uri)
-            logger.debug(f"[{job_id}] Returning done status, video_url={video_url}")
-            return JobStatus(
-                status="done",
-                job_start_time=job_start_time,
-                job_end_time=job_end_time,
-                video_url=video_url,
-                original_bet_link=original_bet_link,
-                image1_url=image1_url,
-                image2_url=image2_url,
-            )
+            return JobStatus(status="done", job_start_time=job_start_time, job_end_time=job_end_time, video_url=video_url, original_bet_link=original_bet_link, image_url=image_url)
 
         if status == "processing" and job.get("operation_name"):
-            logger.info(f"[{job_id}] Polling Veo operation: {job.get('operation_name')}")
-            result = await self.vertex_service.get_video_status_by_name(
-                job["operation_name"]
-            )
-            logger.info(f"[{job_id}] Veo operation result: status={result.status}, video_url={result.video_url}")
+            result = await self.vertex_service.get_video_status_by_name(job["operation_name"])
             if result.status == "done":
-                logger.info(f"[{job_id}] Veo operation COMPLETE!")
-                logger.info(f"[{job_id}] Raw video URI from Veo: {result.video_url}")
-
-                # Store raw URI and generate signed URL
                 video_uri = result.video_url
-                video_url = self._generate_signed_url(video_uri)
-                logger.info(f"[{job_id}] Generated signed URL for video")
-
+                video_url = self._generate_signed_url(video_uri) if video_uri else None
                 job["status"] = "done"
-                job["video_uri"] = video_uri  # Store raw gs:// URI
-                job["video_url"] = video_url  # Store signed URL (will expire)
+                job["video_uri"] = video_uri
+                job["video_url"] = video_url
                 job["job_end_time"] = datetime.now().isoformat()
                 await self._save_job(job_id, job)
-                logger.info(f"[{job_id}] ========== JOB COMPLETE ==========")
-                return JobStatus(
-                    status="done",
-                    job_start_time=job_start_time,
-                    job_end_time=self._parse_timestamp(job["job_end_time"]),
-                    video_url=video_url,
-                    original_bet_link=original_bet_link,
-                    image1_url=image1_url,
-                    image2_url=image2_url,
-                )
-            logger.debug(f"[{job_id}] Veo still processing, returning waiting")
-            return JobStatus(
-                status="waiting",
-                job_start_time=job_start_time,
-                original_bet_link=original_bet_link,
-                image1_url=image1_url,
-                image2_url=image2_url,
-            )
+                print(f"[{job_id[:8]}] Video complete", flush=True)
+                return JobStatus(status="done", job_start_time=job_start_time, job_end_time=self._parse_timestamp(job["job_end_time"]), video_url=video_url, original_bet_link=original_bet_link, image_url=image_url)
+            if result.status == "error":
+                job["status"] = "error"
+                job["error"] = result.error
+                await self._save_job(job_id, job)
+                return JobStatus(status="error", error=result.error, original_bet_link=original_bet_link, image_url=image_url)
+            return JobStatus(status="waiting", job_start_time=job_start_time, original_bet_link=original_bet_link, image_url=image_url)
 
-        logger.debug(f"[{job_id}] Unknown status, returning waiting")
-        return JobStatus(
-            status="waiting",
-            job_start_time=job_start_time,
-            original_bet_link=original_bet_link,
-            image1_url=image1_url,
-            image2_url=image2_url,
-        )
+        return JobStatus(status="waiting", job_start_time=job_start_time, original_bet_link=original_bet_link, image_url=image_url)
 
     async def update_job(self, job_id: str, data: dict):
         existing = await self._load_job(job_id) or {}
