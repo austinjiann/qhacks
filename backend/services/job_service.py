@@ -34,7 +34,7 @@ IMAGE_REQUEST_HEADERS = {
     "Sec-Fetch-Site": "cross-site",
 }
 
-MAX_CHARACTER_IMAGES = 3
+MAX_CHARACTER_IMAGES = 2
 
 
 def _unwrap_image_url(url: str) -> str:
@@ -182,71 +182,11 @@ def _is_probable_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-async def _resolve_query_to_image_urls(
-    session: aiohttp.ClientSession,
-    query: str,
-    *,
-    limit: int = 3,
-) -> list[str]:
-    """
-    Resolve a text query to likely image URLs using Wikimedia Commons search.
-    This avoids brittle full-page scraping for generic entities like animals/objects.
-    """
-    q = (query or "").strip()
-    if not q:
-        return []
-
-    endpoint = "https://commons.wikimedia.org/w/api.php"
-    params = {
-        "action": "query",
-        "generator": "search",
-        "gsrsearch": q,
-        "gsrnamespace": "6",  # File namespace
-        "gsrlimit": "8",
-        "prop": "imageinfo",
-        "iiprop": "url|mime",
-        "format": "json",
-        "formatversion": "2",
-    }
-
-    try:
-        async with session.get(
-            endpoint,
-            params=params,
-            timeout=aiohttp.ClientTimeout(total=4),
-            headers=IMAGE_REQUEST_HEADERS,
-        ) as response:
-            if response.status != 200:
-                print(f"Wikimedia query failed for '{q}': HTTP {response.status}", flush=True)
-                return []
-
-            payload = await response.json(content_type=None)
-    except Exception as exc:
-        print(f"Wikimedia query failed for '{q}': {exc}", flush=True)
-        return []
-
-    urls: list[str] = []
-    pages = (payload or {}).get("query", {}).get("pages", []) or []
-    for page in pages:
-        for info in page.get("imageinfo", []) or []:
-            mime = (info.get("mime") or "").lower()
-            url = (info.get("url") or "").strip()
-            if not url or not mime.startswith("image/"):
-                continue
-            if url not in urls:
-                urls.append(url)
-            if len(urls) >= limit:
-                return urls
-    return urls
-
-
 async def _load_character_images(
     character_image_urls: list[str],
-    character_queries: list[str],
-) -> tuple[list[bytes], list[str]]:
+) -> list[bytes]:
     """
-    Resolve character image sources and fetch bytes with parallel best-effort retrieval.
-    Returns (image_bytes, resolved_source_urls).
+    Fetch character images from direct URLs with parallel best-effort retrieval.
     """
     unique_urls: list[str] = []
     for url in character_image_urls:
@@ -254,47 +194,17 @@ async def _load_character_images(
         if u and u not in unique_urls:
             unique_urls.append(u)
 
-    query_terms: list[str] = []
-    for q in character_queries:
-        normalized = (q or "").strip()
-        if normalized and normalized not in query_terms:
-            query_terms.append(normalized)
-    query_terms = query_terms[:5]
-
     connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(headers=IMAGE_REQUEST_HEADERS, connector=connector) as session:
-        # Resolve text queries first.
-        if query_terms:
-            query_tasks = [
-                asyncio.create_task(_resolve_query_to_image_urls(session, query, limit=3))
-                for query in query_terms
-            ]
-            try:
-                results = await asyncio.gather(*query_tasks, return_exceptions=True)
-                for result in results:
-                    try:
-                        if isinstance(result, Exception):
-                            raise result
-                        for resolved_url in result:
-                            if resolved_url not in unique_urls:
-                                unique_urls.append(resolved_url)
-                    except Exception as exc:
-                        print(f"Character query resolution task failed: {exc}", flush=True)
-            finally:
-                for task in query_tasks:
-                    if not task.done():
-                        task.cancel()
-
         if not unique_urls:
-            return [], []
-        # Keep resolver bounded even if callers pass many URLs/queries.
-        unique_urls = unique_urls[:18]
+            return []
+        unique_urls = unique_urls[:MAX_CHARACTER_IMAGES]
 
-        fetch_tasks: list[tuple[str, asyncio.Task]] = [
-            (url, asyncio.create_task(_fetch_image_bytes(session, url)))
+        fetch_tasks: list[asyncio.Task] = [
+            asyncio.create_task(_fetch_image_bytes(session, url))
             for url in unique_urls
         ]
-        pending: set[asyncio.Task] = {task for _, task in fetch_tasks}
+        pending: set[asyncio.Task] = set(fetch_tasks)
         loaded_images: list[bytes] = []
 
         for task in asyncio.as_completed(list(pending)):
@@ -311,7 +221,7 @@ async def _load_character_images(
             if not task.done():
                 task.cancel()
 
-    return loaded_images, unique_urls
+    return loaded_images
 
 
 class JobService:
@@ -513,24 +423,26 @@ class JobService:
             character_images = []
             if character_image_urls:
                 print(f"[{jid}] Fetching {len(character_image_urls)} character image(s)...", flush=True)
-                character_images, _ = await _load_character_images(
+                character_images = await _load_character_images(
                     character_image_urls=character_image_urls,
-                    character_queries=[],
                 )
                 print(f"[{jid}] Loaded {len(character_images)} character image(s)", flush=True)
 
-            # Generate first frame (from source image + character images if available)
-            first_prompt = create_first_image_prompt(
-                title=title,
-                outcome=outcome,
-                original_bet_link=original_bet_link,
-                style=shorts_style,  # "action" or "animated"
-            )
-            first_image = await self.vertex_service.generate_image_from_prompt(
-                prompt=first_prompt,
-                image=source_image,
-                character_images=character_images if character_images else None,
-            )
+            # Use provided source image directly as the Veo starting frame.
+            # Fallback to Gemini start-frame generation only when source image is missing.
+            if source_image:
+                first_image = source_image
+                print(f"[{jid}] Using source image directly as Veo starting frame", flush=True)
+            else:
+                first_prompt = create_first_image_prompt(
+                    title=title,
+                    outcome=outcome,
+                    original_bet_link=original_bet_link,
+                    style=shorts_style,  # "action" or "animated"
+                )
+                first_image = await self.vertex_service.generate_image_from_prompt(
+                    prompt=first_prompt,
+                )
 
             image_uri = ""
             if self.bucket:
@@ -542,10 +454,10 @@ class JobService:
                 original_bet_link=original_bet_link,
                 style=shorts_style,  # "action" or "animated"
             )
-            # Character images already baked into first_image by Gemini
             operation = await self.vertex_service.generate_video_content(
                 prompt=veo_prompt,
                 image_data=first_image,
+                character_images=character_images if character_images else None,
                 duration_seconds=duration,
             )
 

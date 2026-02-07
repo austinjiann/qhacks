@@ -13,6 +13,7 @@ from models.job import JobStatus
 from utils.env import settings
 
 logger = logging.getLogger("vertex_service")
+MAX_VEO_REFERENCE_IMAGES = 2
 
 
 def _infer_mime_type(image_bytes: bytes) -> str:
@@ -41,20 +42,50 @@ class VertexService:
         self,
         prompt: str,
         image_data: bytes,
+        character_images: list[bytes] | None = None,
         duration_seconds: int = 8,
     ) -> GenerateVideosOperation:
         """
-        Generate video using Veo 3.1 from a single starting frame.
-        Character images should be baked into the frame via Gemini first.
+        Generate video using Veo 3.1 preview from a starting frame.
+        Optionally pass up to 2 character reference images directly to Veo.
         """
         output_gcs_uri = f"gs://{self.bucket_name}/videos/"
         image_mime = _infer_mime_type(image_data)
+        ref_images = []
+        for idx, ref_img in enumerate((character_images or [])[:MAX_VEO_REFERENCE_IMAGES], start=1):
+            ref_images.append(
+                {
+                    "reference_id": f"person_{idx}",
+                    "reference_type": "SUBJECT",
+                    "reference_image": Image(
+                        image_bytes=ref_img,
+                        mime_type=_infer_mime_type(ref_img),
+                    ),
+                }
+            )
 
-        logger.info(f"Calling Veo 3.1 with start frame ({len(image_data)} bytes, {image_mime})")
+        final_prompt = prompt
+        if ref_images:
+            id_lines = "\n".join(
+                f"- {ref['reference_id']}: keep this exact person's face identity."
+                for ref in ref_images
+            )
+            final_prompt = (
+                f"{prompt}\n\n"
+                "REFERENCE SUBJECTS:\n"
+                f"{id_lines}\n"
+                "Use all referenced subjects as distinct primary characters. "
+                "Do not blend identities or swap faces."
+            )
+
+        logger.info(
+            f"Calling Veo 3.1 preview with start frame ({len(image_data)} bytes, {image_mime}) "
+            f"and {len(ref_images)} reference image(s)"
+        )
 
         operation = self.client.models.generate_videos(
-            model="veo-3.1-generate-001",
-            prompt=prompt,
+            model="veo-3.1-generate-preview",
+            prompt=final_prompt,
             image=Image(
                 image_bytes=image_data,
                 mime_type=image_mime,
@@ -67,17 +98,17 @@ class VertexService:
                     "text, captions, subtitles, logos, low quality, static, "
                     "ugly, deformed faces, identity drift, backwards motion"
                 ),
+                reference_images=ref_images if ref_images else None,
             ),
         )
 
-        logger.info("Veo 3.1 request submitted")
+        logger.info("Veo 3.1 preview request submitted")
         return operation
     
     async def generate_image_from_prompt(
         self,
         prompt: str,
         image: bytes | None = None,
-        character_images: list[bytes] | None = None,
     ) -> bytes:
         if not prompt:
             raise ValueError("prompt is required")
@@ -89,52 +120,7 @@ class VertexService:
             logger.info(f"Adding source image ({len(image)} bytes) to Gemini request")
             contents.append(Part.from_bytes(data=image, mime_type=_infer_mime_type(image)))
 
-        # Add character images for identity context
-        if character_images:
-            logger.info(f"Adding {len(character_images)} character image(s) to Gemini request")
-            for i, ref_img in enumerate(character_images):
-                logger.info(f"  Character image {i+1}: {len(ref_img)} bytes")
-                contents.append(Part.from_bytes(data=ref_img, mime_type=_infer_mime_type(ref_img)))
-        else:
-            logger.info("No character images provided to Gemini")
-
-        # Build strict image-conditioning instructions based on supplied images.
-        if image and character_images:
-            enhanced_prompt = f"""{prompt}
-
-IMAGE USAGE INSTRUCTIONS:
-- IMAGE 1 is the ACTION AND COMPOSITION anchor.
-- IMAGES 2+ are CHARACTER IDENTITY anchors.
-
-HARD CONSTRAINTS:
-- Faces from IMAGES 2+ must match exactly (facial structure, skin tone, hairline, age range).
-- Do not merge identities, swap faces, or invent new primary subjects.
-- Keep each character as a distinct person on screen (no blended faces).
-- Keep uniform/team styling from IMAGE 1 when visible.
-- Preserve high-energy motion pose from IMAGE 1.
-- Scene must clearly depict the selected outcome as true."""
-        elif image:
-            enhanced_prompt = f"""{prompt}
-
-Use the provided action image as reference for:
-- Athletic pose and composition
-- Uniform colors and team branding
-- Energy and movement style
-- Stadium atmosphere
-
-Create a cinematic, action-heavy frame that can cleanly animate into an intense short clip."""
-        elif character_images:
-            enhanced_prompt = f"""{prompt}
-
-The provided images are CHARACTER references.
-- Use all provided identities as the main subjects.
-- Faces must match exactly.
-- Build a dynamic scene around these people.
-- No face morphing, no identity swaps."""
-        else:
-            enhanced_prompt = prompt
-
-        contents.append(enhanced_prompt)
+        contents.append(prompt)
 
         response = self.client.models.generate_content(
             model="gemini-2.5-flash-image",
