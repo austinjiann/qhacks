@@ -5,6 +5,7 @@ import traceback
 import uuid
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 from google.cloud import storage
@@ -15,15 +16,57 @@ from utils.env import settings
 from utils.veo_prompt_builder import create_video_prompt
 
 logger = logging.getLogger("job_service")
+MAX_REFERENCE_IMAGES = 3
+IMAGE_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/png,image/jpeg,image/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _looks_like_image(data: bytes) -> bool:
+    if not data:
+        return False
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if data.startswith(b"\xff\xd8\xff"):
+        return True
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return True
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return True
+    if len(data) > 12 and data[4:12] == b"ftypavif":
+        return True
+    return False
 
 
 async def fetch_image_from_url(url: str) -> Optional[bytes]:
     """Fetch image bytes from URL."""
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    request_headers = {
+        **IMAGE_REQUEST_HEADERS,
+        "Referer": f"{parsed.scheme}://{parsed.netloc}/",
+    }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status == 200:
-                    return await response.read()
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(headers=request_headers, connector=connector) as session:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=15),
+                allow_redirects=True,
+            ) as response:
+                if response.status != 200:
+                    return None
+                payload = await response.read()
+                content_type = (response.headers.get("Content-Type") or "").lower()
+                if content_type.startswith("image/") or _looks_like_image(payload):
+                    return payload
     except Exception as e:
         print(f"Failed to fetch image from {url}: {e}", flush=True)
     return None
@@ -173,6 +216,7 @@ class JobService:
                 "original_bet_link": request.original_bet_link,
                 "duration_seconds": request.duration_seconds,
                 "source_image_url": request.source_image_url,
+                "reference_image_urls": request.reference_image_urls,
             },
         )
 
@@ -182,6 +226,7 @@ class JobService:
             "original_bet_link": request.original_bet_link,
             "duration_seconds": request.duration_seconds,
             "source_image_url": request.source_image_url,
+            "reference_image_urls": request.reference_image_urls,
         }
 
         if self.cloud_tasks:
@@ -206,6 +251,14 @@ class JobService:
             original_bet_link = job_data["original_bet_link"]
             duration = int(job_data.get("duration_seconds", 8))
             source_image_url = job_data.get("source_image_url")
+            raw_reference_urls = job_data.get("reference_image_urls") or []
+            if isinstance(raw_reference_urls, str):
+                raw_reference_urls = [
+                    u.strip()
+                    for u in raw_reference_urls.replace("\r", "\n").split("\n")
+                    if u.strip()
+                ]
+            reference_image_urls = [u for u in raw_reference_urls if u][:MAX_REFERENCE_IMAGES]
             if not source_image_url:
                 raise ValueError("source_image_url is required")
 
@@ -214,6 +267,16 @@ class JobService:
             if not source_image:
                 raise ValueError("source_image_url could not be fetched as an image")
             print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
+
+            reference_images: list[bytes] = []
+            if reference_image_urls:
+                print(f"[{jid}] Fetching {len(reference_image_urls)} reference image(s)...", flush=True)
+                results = await asyncio.gather(*[fetch_image_from_url(url) for url in reference_image_urls])
+                reference_images = [img for img in results if img is not None]
+                print(
+                    f"[{jid}] Loaded {len(reference_images)}/{len(reference_image_urls)} reference image(s)",
+                    flush=True,
+                )
 
             image_uri = ""
             if self.bucket:
@@ -228,6 +291,7 @@ class JobService:
                 prompt=veo_prompt,
                 image_data=source_image,
                 duration_seconds=duration,
+                reference_images=reference_images if reference_images else None,
             )
 
             await self._save_job(job_id, {

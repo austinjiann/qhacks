@@ -10,6 +10,7 @@ from models.job import JobStatus
 from utils.env import settings
 
 logger = logging.getLogger("vertex_service")
+MAX_REFERENCE_IMAGES = 3
 
 
 def _infer_mime_type(image_bytes: bytes) -> str:
@@ -39,9 +40,24 @@ class VertexService:
         prompt: str,
         image_data: bytes,
         duration_seconds: int = 8,
+        reference_images: list[bytes] | None = None,
     ) -> GenerateVideosOperation:
         output_gcs_uri = f"gs://{self.bucket_name}/videos/"
-        logger.info(f"Calling Veo with 1 source image ({len(image_data)} bytes)")
+        ref_payload = []
+        for ref_img in (reference_images or [])[:MAX_REFERENCE_IMAGES]:
+            ref_payload.append(
+                {
+                    "image": Image(
+                        image_bytes=ref_img,
+                        mime_type=_infer_mime_type(ref_img),
+                    ),
+                    "reference_type": "ASSET",
+                }
+            )
+        logger.info(
+            f"Calling Veo preview with source image ({len(image_data)} bytes) "
+            f"and {len(ref_payload)} reference image(s)"
+        )
         image_mime = _infer_mime_type(image_data)
         config_kwargs = {
             "aspect_ratio": "9:16",
@@ -52,9 +68,10 @@ class VertexService:
                 "ugly, bad anatomy, extra limbs, deformed faces, identity drift, face morphing, "
                 "weird physics, backwards motion, reverse playback"
             ),
-            # Veo 3.1 max is 1080p (4K is not available on Veo in Vertex AI).
-            "resolution": "1080p",
+            "resolution": "4k",
         }
+        if ref_payload:
+            config_kwargs["reference_images"] = ref_payload
         try:
             config = GenerateVideosConfig(**config_kwargs)
         except Exception as exc:
@@ -62,15 +79,22 @@ class VertexService:
             config_kwargs.pop("resolution", None)
             config = GenerateVideosConfig(**config_kwargs)
 
-        operation = self.client.models.generate_videos(
-            model="veo-3.1-generate-001",
-            prompt=prompt,
-            image=Image(
-                image_bytes=image_data,
-                mime_type=image_mime,
-            ),
-            config=config,
-        )
+        try:
+            operation = self.client.models.generate_videos(
+                model="veo-3.1-generate-preview",
+                prompt=prompt,
+                image=Image(
+                    image_bytes=image_data,
+                    mime_type=image_mime,
+                ),
+                config=config,
+            )
+        except Exception as exc:
+            if ref_payload:
+                raise RuntimeError(
+                    f"Veo request failed while using source image + reference images: {exc}"
+                ) from exc
+            raise
         return operation
     
     async def get_video_status(self, operation: GenerateVideosOperation) -> JobStatus:

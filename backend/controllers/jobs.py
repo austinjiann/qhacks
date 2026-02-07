@@ -16,7 +16,27 @@ class Jobs(APIController):
     def __init__(self, job_service: JobService):
         self.job_service = job_service
 
+    @staticmethod
+    def _coerce_list(value) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            rows = value.replace("\r", "\n").split("\n")
+            return [
+                item.strip()
+                for row in rows
+                for item in row.split(",")
+                if item.strip()
+            ]
+        if isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
+
     def _coerce_payload(self, payload: dict) -> dict:
+        ref_urls = self._coerce_list(
+            payload.get("reference_image_urls")
+            or payload.get("referenceImageUrls")
+        )
         return {
             "title": payload.get("title"),
             # New schema uses "outcome"; keep "caption" as backward-compatible fallback.
@@ -30,6 +50,7 @@ class Jobs(APIController):
             ),
             "duration_seconds": payload.get("duration_seconds", 8),
             "source_image_url": payload.get("source_image_url") or payload.get("sourceImageUrl"),
+            "reference_image_urls": ref_urls,
         }
 
     @post("/create")
@@ -85,6 +106,7 @@ class Jobs(APIController):
             duration_seconds = int(payload.get("duration_seconds", 6))
         except Exception:
             duration_seconds = 6
+        reference_image_urls = payload.get("reference_image_urls") or []
 
         job_request = VideoJobRequest(
             title=title,
@@ -92,6 +114,7 @@ class Jobs(APIController):
             original_bet_link=original_bet_link,
             duration_seconds=max(5, min(duration_seconds, 8)),
             source_image_url=source_image_url,
+            reference_image_urls=reference_image_urls[:3],
         )
 
         log_api("/create", f"Creating video job (duration={job_request.duration_seconds}s)...")

@@ -175,9 +175,22 @@
                 type="url"
                 id="sourceImageUrl"
                 placeholder="https://example.com/image.jpg"
-                value="https://seahawkswire.usatoday.com/gcdn/authoring/images/smg/2025/02/26/SSEA/80639341007-61-34639.jpeg?width=660&height=505&fit=crop&format=pjpg&auto=webp"
+                value="https://a.espncdn.com/i/headshots/nfl/players/full/4430878.png"
                 required
             >
+        </div>
+
+        <div class="form-group">
+            <label for="referenceImageUrls">Reference Image URLs (optional, up to 3)</label>
+            <textarea
+                id="referenceImageUrls"
+                placeholder="https://example.com/person1.png
+https://example.com/person2.png
+https://example.com/person3.png"
+                style="min-height: 70px;"
+            >https://a.espncdn.com/i/headshots/nfl/players/full/4430878.png
+https://a.espncdn.com/i/headshots/nfl/players/full/3912547.png
+https://a.espncdn.com/i/headshots/nfl/players/full/3120348.png</textarea>
         </div>
 
         <button type="submit" id="submitBtn">Start Job</button>
@@ -263,6 +276,10 @@
             const originalBetLink = document.getElementById('originalBetLink').value;
             const duration = parseInt(document.getElementById('duration').value) || 8;
             const sourceImageUrl = document.getElementById('sourceImageUrl').value.trim() || null;
+            const referenceImageUrlsRaw = document.getElementById('referenceImageUrls').value.trim();
+            const referenceImageUrls = referenceImageUrlsRaw
+                ? referenceImageUrlsRaw.split(/[,\n]/).map(u => u.trim()).filter(u => u).slice(0, 3)
+                : [];
 
             submitBtn.disabled = true;
             stopBtn.disabled = false;
@@ -283,6 +300,7 @@
             log(`Title: ${title}`, 'info');
             log(`Outcome: ${outcome.substring(0, 50)}...`, 'info');
             log(`Bet Link: ${originalBetLink}`, 'info');
+            log(`Reference images: ${referenceImageUrls.length}`, 'info');
 
             try {
                 log('Sending POST to /api/jobs/create...', 'info');
@@ -296,7 +314,8 @@
                         outcome,
                         original_bet_link: originalBetLink,
                         duration_seconds: duration,
-                        source_image_url: sourceImageUrl
+                        source_image_url: sourceImageUrl,
+                        reference_image_urls: referenceImageUrls
                     })
                 });
 
