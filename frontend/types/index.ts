@@ -34,3 +34,12 @@ export interface GeneratedVideo {
   side: 'YES' | 'NO'
   kalshi_ticker: string
 }
+
+export type QueueItemStatus = 'pending' | 'processing' | 'matched' | 'failed'
+
+export interface QueueItem {
+  video_id: string
+  status: QueueItemStatus
+  result?: FeedItem
+  error?: string
+}

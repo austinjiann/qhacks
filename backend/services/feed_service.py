@@ -5,13 +5,19 @@ import time
 from typing import Optional
 
 import aiohttp
+import firebase_admin
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from firebase_admin import credentials, firestore
 from openai import AsyncOpenAI
 
 from utils.env import settings
 
 KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate("qhacks-486618-firebase-adminsdk-fbsvc-6ae4974082.json")
+    firebase_admin.initialize_app(cred)
 
 SPORTS_CRYPTO_SERIES = {
     "bitcoin": "KXBTC", "btc": "KXBTC", "crypto": "KXBTC",
@@ -34,6 +40,8 @@ class FeedService:
         self.youtube_api_key = settings.YOUTUBE_API_KEY
         self.kalshi_api_key = settings.KALSHI_API_KEY
         self.kalshi_private_key = self._load_private_key()
+        self.db = firestore.client()
+        self.cache_collection = self.db.collection("video_matches")
 
     def _load_private_key(self):
         with open(settings.KALSHI_PRIVATE_KEY_PATH, "rb") as f:
@@ -237,7 +245,27 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                 "outcome": yes_sub_title.split(",")[0].replace("yes ", "") if yes_sub_title else "",
             }
 
+    def _get_cached(self, video_id: str) -> Optional[dict]:
+        try:
+            doc = self.cache_collection.document(video_id).get()
+            if doc.exists:
+                return doc.to_dict()
+        except Exception as e:
+            print(f"[{video_id}] Cache read error: {e}")
+        return None
+
+    def _set_cached(self, video_id: str, data: dict) -> None:
+        try:
+            self.cache_collection.document(video_id).set(data)
+        except Exception as e:
+            print(f"[{video_id}] Cache write error: {e}")
+
     async def match_video(self, video_id: str) -> Optional[dict]:
+        cached = self._get_cached(video_id)
+        if cached:
+            print(f"[{video_id}] Cache hit")
+            return cached
+
         print(f"[{video_id}] Starting match...")
         metadata = await self.get_video_metadata(video_id)
         print(f"[{video_id}] Title: {metadata.get('title', 'No title')}")
@@ -266,7 +294,7 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                         pass
                 print(f"[{video_id}] SUCCESS (series) - Market: {best_market.get('ticker')}")
                 formatted = await self._format_market_display(best_market, best_event, keywords)
-                return {
+                result = {
                     "youtube": {
                         "video_id": video_id,
                         "title": metadata["title"],
@@ -283,6 +311,8 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                     },
                     "keywords": keywords,
                 }
+                self._set_cached(video_id, result)
+                return result
 
         events = await self._get_events(status="open", limit=200)
         print(f"[{video_id}] Events fetched: {len(events)}")
@@ -312,7 +342,7 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
         print(f"[{video_id}] SUCCESS (event) - Market: {best_market.get('ticker')}")
         formatted = await self._format_market_display(best_market, best_event, keywords)
 
-        return {
+        result = {
             "youtube": {
                 "video_id": video_id,
                 "title": metadata["title"],
@@ -329,6 +359,8 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
             },
             "keywords": keywords,
         }
+        self._set_cached(video_id, result)
+        return result
 
     async def get_feed(self, video_ids: list[str]) -> list[dict]:
         tasks = [self.match_video(vid) for vid in video_ids]

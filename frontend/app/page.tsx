@@ -3,46 +3,79 @@
 import { useState, useRef, useEffect } from 'react'
 import { Iphone } from '@/components/ui/iphone'
 import Feed, { FeedRef } from '@/components/Feed'
-import { KalshiMarket, FeedItem } from '@/types'
-
-const API_URL = 'http://localhost:8000'
+import { KalshiMarket } from '@/types'
+import { useVideoQueue } from '@/hooks/useVideoQueue'
 
 export default function Home() {
-  const [feedItems, setFeedItems] = useState<FeedItem[]>([])
+  const { feedItems, stats, isProcessing, processQueue } = useVideoQueue()
   const [currentMarket, setCurrentMarket] = useState<KalshiMarket | undefined>(undefined)
-  const [loading, setLoading] = useState(true)
   const feedRef = useRef<FeedRef>(null)
+  const hasProcessed = useRef(false)
 
   useEffect(() => {
-    async function fetchFeed() {
-      try {
-        const res = await fetch(`${API_URL}/shorts/feed`)
-        if (res.ok) {
-          const data = await res.json()
-          setFeedItems(data)
-          if (data[0]?.kalshi) {
-            setCurrentMarket(data[0].kalshi)
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch feed:', err)
-      } finally {
-        setLoading(false)
-      }
+    if (stats.pending > 0 && !isProcessing && !hasProcessed.current) {
+      hasProcessed.current = true
+      processQueue()
     }
-    fetchFeed()
-  }, [])
+  }, [stats.pending, isProcessing, processQueue])
+
+  useEffect(() => {
+    if (feedItems.length > 0 && feedItems[0]?.kalshi && !currentMarket) {
+      setCurrentMarket(feedItems[0].kalshi)
+    }
+  }, [feedItems, currentMarket])
 
   const handleBet = (side: 'YES' | 'NO') => {
     console.log(`Bet placed: ${side} on ${currentMarket?.ticker}`)
   }
 
-  if (loading) {
+  const progress = stats.total > 0 ? ((stats.matched + stats.failed) / stats.total) * 100 : 0
+
+  if (stats.total === 0) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#9a9a7f]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
-          <div className="text-white text-xl" style={{ fontFamily: "var(--font-playfair), serif" }}>Loading bets...</div>
+        <div className="text-white text-xl" style={{ fontFamily: "var(--font-playfair), serif" }}>No videos in queue</div>
+      </div>
+    )
+  }
+
+  if (isProcessing || stats.pending > 0 || stats.processing > 0) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#9a9a7f]">
+        <div className="flex flex-col items-center gap-6 p-8 bg-[#1a1a1a] rounded-2xl min-w-[320px]">
+          <div className="text-white text-xl" style={{ fontFamily: "var(--font-playfair), serif" }}>
+            Processing Videos
+          </div>
+          <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+            <div 
+              className="bg-green-500 h-full transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="flex gap-4 text-sm text-gray-400">
+            <span>{stats.matched} matched</span>
+            <span>{stats.processing} processing</span>
+            <span>{stats.pending} pending</span>
+            {stats.failed > 0 && <span className="text-red-400">{stats.failed} failed</span>}
+          </div>
+          <div className="flex flex-wrap gap-2 max-w-[280px]">
+            {Array.from({ length: stats.total }).map((_, i) => {
+              const status = i < stats.matched ? 'matched' : 
+                            i < stats.matched + stats.failed ? 'failed' :
+                            i < stats.matched + stats.failed + stats.processing ? 'processing' : 'pending'
+              return (
+                <div 
+                  key={i}
+                  className={`w-3 h-3 rounded-full ${
+                    status === 'matched' ? 'bg-green-500' :
+                    status === 'failed' ? 'bg-red-500' :
+                    status === 'processing' ? 'bg-yellow-500 animate-pulse' :
+                    'bg-gray-600'
+                  }`}
+                />
+              )
+            })}
+          </div>
         </div>
       </div>
     )

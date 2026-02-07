@@ -3,15 +3,6 @@ from blacksheep.server.controllers import APIController, get
 
 from services.feed_service import FeedService
 
-HARDCODED_VIDEO_IDS = [
-    "vHaPgrSMlI0",
-    "HZOkwNsYFdo",
-    "w1rbnM6A4AA",
-    "_qW6a1A9gb0",
-    "3fQhDJlRJYg",
-    "LQ8uCvKYu3Y",
-]
-
 
 class Shorts(APIController):
     def __init__(self, feed_service: FeedService):
@@ -35,9 +26,13 @@ class Shorts(APIController):
         return json(result)
 
     @get("/feed")
-    async def get_feed(self, limit: int = 20):
-        video_ids = HARDCODED_VIDEO_IDS[:limit]
-        results = await self.feed_service.get_feed(video_ids)
+    async def get_feed(self, video_ids: str = "", limit: int = 10):
+        if not video_ids:
+            return json({"error": "video_ids required"}, status=400)
+        ids = [v.strip() for v in video_ids.split(",") if v.strip()][:limit]
+        if not ids:
+            return json({"error": "No valid video_ids provided"}, status=400)
+        results = await self.feed_service.get_feed(ids)
         feed = []
         for i, item in enumerate(results):
             feed.append({
