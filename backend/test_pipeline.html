@@ -170,25 +170,14 @@
         </div>
 
         <div class="form-group">
-            <label for="sourceImageUrl">Source Image URL (optional - main image to use as base)</label>
+            <label for="sourceImageUrl">Source Image URL * (starting frame)</label>
             <input
                 type="url"
                 id="sourceImageUrl"
                 placeholder="https://example.com/image.jpg"
                 value="https://seahawkswire.usatoday.com/gcdn/authoring/images/smg/2025/02/26/SSEA/80639341007-61-34639.jpeg?width=660&height=505&fit=crop&format=pjpg&auto=webp"
+                required
             >
-        </div>
-
-        <div class="form-group">
-            <label for="referenceImageUrls">Reference Image URLs (optional - for uniforms, players, style)</label>
-            <textarea
-                id="referenceImageUrls"
-                placeholder="https://i.imgur.com/example1.jpg
-https://pbs.twimg.com/media/example2.png"
-                style="min-height: 60px;"
-            >https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/4430878.png&w=350&h=254
-https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/3912547.png&w=350&h=254</textarea>
-            <small style="color: #666;">Direct image URLs only (.jpg, .png) - one per line. Right-click an image -> "Copy image address"</small>
         </div>
 
         <button type="submit" id="submitBtn">Start Job</button>
@@ -201,7 +190,7 @@ https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/3912547.png&w
     </div>
 
     <div id="imagesContainer" style="display: none;">
-        <h3>Gemini Generated Start Frame</h3>
+        <h3>Starting Frame</h3>
         <div class="images-container">
             <div class="image-box">
                 <h4>Start Frame</h4>
@@ -275,12 +264,6 @@ https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/3912547.png&w
             const duration = parseInt(document.getElementById('duration').value) || 8;
             const sourceImageUrl = document.getElementById('sourceImageUrl').value.trim() || null;
 
-            // Parse reference image URLs (supports comma or newline separated)
-            const refUrlsRaw = document.getElementById('referenceImageUrls').value.trim();
-            const referenceImageUrls = refUrlsRaw
-                ? refUrlsRaw.split(/[,\n]/).map(u => u.trim()).filter(u => u)
-                : [];
-
             submitBtn.disabled = true;
             stopBtn.disabled = false;
             statusDiv.style.display = 'block';
@@ -300,9 +283,6 @@ https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/3912547.png&w
             log(`Title: ${title}`, 'info');
             log(`Outcome: ${outcome.substring(0, 50)}...`, 'info');
             log(`Bet Link: ${originalBetLink}`, 'info');
-            if (referenceImageUrls.length > 0) {
-                log(`Reference images: ${referenceImageUrls.length} URL(s)`, 'info');
-            }
 
             try {
                 log('Sending POST to /api/jobs/create...', 'info');
@@ -316,8 +296,7 @@ https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/3912547.png&w
                         outcome,
                         original_bet_link: originalBetLink,
                         duration_seconds: duration,
-                        source_image_url: sourceImageUrl,
-                        reference_image_urls: referenceImageUrls
+                        source_image_url: sourceImageUrl
                     })
                 });
 

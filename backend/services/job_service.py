@@ -3,7 +3,7 @@ import json
 import logging
 import traceback
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 import aiohttp
@@ -12,7 +12,6 @@ from google.cloud import storage
 from models.job import JobStatus, VideoJobRequest
 from services.vertex_service import VertexService
 from utils.env import settings
-from utils.gemini_prompt_builder import create_first_image_prompt
 from utils.veo_prompt_builder import create_video_prompt
 
 logger = logging.getLogger("job_service")
@@ -174,7 +173,6 @@ class JobService:
                 "original_bet_link": request.original_bet_link,
                 "duration_seconds": request.duration_seconds,
                 "source_image_url": request.source_image_url,
-                "reference_image_urls": request.reference_image_urls,
             },
         )
 
@@ -184,7 +182,6 @@ class JobService:
             "original_bet_link": request.original_bet_link,
             "duration_seconds": request.duration_seconds,
             "source_image_url": request.source_image_url,
-            "reference_image_urls": request.reference_image_urls,
         }
 
         if self.cloud_tasks:
@@ -209,44 +206,18 @@ class JobService:
             original_bet_link = job_data["original_bet_link"]
             duration = int(job_data.get("duration_seconds", 8))
             source_image_url = job_data.get("source_image_url")
-            reference_image_urls = job_data.get("reference_image_urls", [])
+            if not source_image_url:
+                raise ValueError("source_image_url is required")
 
             # Fetch source image if URL provided
-            source_image = None
-            if source_image_url:
-                source_image = await fetch_image_from_url(source_image_url)
-                if source_image:
-                    print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
-
-            # Fetch reference images in parallel
-            reference_images = []
-            if reference_image_urls:
-                print(f"[{jid}] Reference URLs received: {reference_image_urls}", flush=True)
-                print(f"[{jid}] Fetching {len(reference_image_urls)} reference image(s)...", flush=True)
-                fetch_tasks = [fetch_image_from_url(url) for url in reference_image_urls]
-                results = await asyncio.gather(*fetch_tasks)
-                reference_images = [img for img in results if img is not None]
-                print(f"[{jid}] Successfully loaded {len(reference_images)}/{len(reference_image_urls)} reference image(s)", flush=True)
-                if len(reference_images) < len(reference_image_urls):
-                    print(f"[{jid}] WARNING: Some reference images failed to fetch!", flush=True)
-            else:
-                print(f"[{jid}] No reference image URLs provided", flush=True)
-
-            # Generate first frame (from source image + reference images if available)
-            first_prompt = create_first_image_prompt(
-                title=title,
-                outcome=outcome,
-                original_bet_link=original_bet_link,
-            )
-            first_image = await self.vertex_service.generate_image_from_prompt(
-                prompt=first_prompt,
-                image=source_image,
-                reference_images=reference_images if reference_images else None,
-            )
+            source_image = await fetch_image_from_url(source_image_url)
+            if not source_image:
+                raise ValueError("source_image_url could not be fetched as an image")
+            print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
 
             image_uri = ""
             if self.bucket:
-                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, first_image)
+                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, source_image)
 
             veo_prompt = create_video_prompt(
                 title=title,
@@ -255,9 +226,8 @@ class JobService:
             )
             operation = await self.vertex_service.generate_video_content(
                 prompt=veo_prompt,
-                image_data=first_image,
+                image_data=source_image,
                 duration_seconds=duration,
-                reference_images=reference_images if reference_images else None,
             )
 
             await self._save_job(job_id, {
