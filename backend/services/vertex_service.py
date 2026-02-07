@@ -46,29 +46,72 @@ class VertexService:
     ) -> GenerateVideosOperation:
         output_gcs_uri = f"gs://{self.bucket_name}/videos/"
 
-        # Veo only supports one conditioning image. Gemini composes character references into this start frame first.
-        logger.info(f"Calling Veo with 1 input image ({len(image_data)} bytes)")
-        if character_images:
-            logger.info(f"Character image count used to build start frame: {len(character_images)}")
+        logger.info(f"Calling Veo with 1 start image ({len(image_data)} bytes)")
         image_mime = _infer_mime_type(image_data)
 
+        model_id = "veo-3.1-fast-generate-001"
+        effective_duration_seconds = duration_seconds
+        aspect_ratio = "9:16"
+        prompt_for_video = prompt
+        config_kwargs: dict = {
+            "aspect_ratio": aspect_ratio,
+            "duration_seconds": effective_duration_seconds,
+            "output_gcs_uri": output_gcs_uri,
+            "negative_prompt": (
+                "text, captions, subtitles, annotations, logos, low quality, static shot, slideshow, "
+                "ugly, bad anatomy, extra limbs, deformed faces, identity drift, face morphing, "
+                "weird physics, backwards motion, reverse playback"
+            ),
+        }
+
+        # Direct subject/character reference mode requires preview model.
+        if character_images:
+            model_id = "veo-3.1-generate-preview"
+            effective_duration_seconds = 8
+            # Veo 3.1 preview reference-image mode supports 16:9 only.
+            aspect_ratio = "16:9"
+
+            limited_refs = character_images[:3]
+            if len(character_images) > 3:
+                logger.info(
+                    "Veo reference-image mode supports up to 3 assets; truncating from %s to 3",
+                    len(character_images),
+                )
+
+            reference_images = [
+                {
+                    "image": Image(
+                        image_bytes=ref,
+                        mime_type=_infer_mime_type(ref),
+                    ),
+                    "reference_type": "asset",
+                }
+                for ref in limited_refs
+            ]
+            config_kwargs["reference_images"] = reference_images
+            config_kwargs["duration_seconds"] = effective_duration_seconds
+            config_kwargs["aspect_ratio"] = aspect_ratio
+            prompt_for_video = (
+                f"""{prompt}
+
+REFERENCE MODE CONSTRAINT:
+- Keep key action and subjects in the center-safe area for potential 9:16 crop in post."""
+            )
+            logger.info(
+                "Using Veo preview reference-image mode with %s direct character asset(s), aspect=%s, duration=%ss",
+                len(limited_refs),
+                aspect_ratio,
+                effective_duration_seconds,
+            )
+
         operation = self.client.models.generate_videos(
-            model="veo-3.1-fast-generate-001",
-            prompt=prompt,
+            model=model_id,
+            prompt=prompt_for_video,
             image=Image(
                 image_bytes=image_data,
                 mime_type=image_mime,
             ),
-            config=GenerateVideosConfig(
-                aspect_ratio="9:16",
-                duration_seconds=duration_seconds,
-                output_gcs_uri=output_gcs_uri,
-                negative_prompt=(
-                    "text, captions, subtitles, annotations, logos, low quality, static shot, slideshow, "
-                    "ugly, bad anatomy, extra limbs, deformed faces, identity drift, face morphing, "
-                    "weird physics, backwards motion, reverse playback"
-                ),
-            ),
+            config=GenerateVideosConfig(**config_kwargs),
         )
         return operation
     
