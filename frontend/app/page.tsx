@@ -7,8 +7,34 @@ import Feed, { FeedRef } from '@/components/Feed'
 import { KalshiMarket } from '@/types'
 import { useVideoQueue } from '@/hooks/useVideoQueue'
 const BgWrapper = ({ children, className = '' }: { children: ReactNode, className?: string }) => (
-  <div className={`relative min-h-screen overflow-hidden ${className}`}>
-    {children}
+  <div className={`relative min-h-screen overflow-hidden ${className}`} style={{ backgroundColor: '#1a2520' }}>
+    {/* Background image layer — light blur for cartoony texture */}
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        backgroundImage: "url('/bg.png')",
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        filter: 'blur(2px)',
+        opacity: 0.7,
+        transform: 'scale(1.02)',
+      }}
+    />
+    {/* Light overlay to soften slightly */}
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'radial-gradient(ellipse at 50% 40%, rgba(16,185,129,0.05) 0%, transparent 70%)',
+        pointerEvents: 'none',
+      }}
+    />
+    {/* Content */}
+    <div className={`relative z-10 h-screen flex items-center justify-center ${className}`}>
+      {children}
+    </div>
   </div>
 )
 
@@ -85,9 +111,9 @@ export default function Home() {
   }
 
   return (
-    <BgWrapper className="flex items-center justify-center p-8">
-      <div className="relative" style={{ filter: 'drop-shadow(0 20px 60px rgba(0,0,0,0.5))' }}>
-        <Iphone className="w-[380px]" frameColor="#1a1a1a">
+    <BgWrapper>
+      <div className="relative max-h-screen" style={{ filter: 'drop-shadow(0 20px 60px rgba(0,0,0,0.5))' }}>
+        <Iphone className="w-[380px] max-h-screen" frameColor="#1a1a1a">
           <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} />
         </Iphone>
         

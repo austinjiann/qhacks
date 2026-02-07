@@ -460,5 +460,11 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
 
     async def get_feed(self, video_ids: list[str]) -> list[dict]:
         tasks = [self.match_video(vid) for vid in video_ids]
-        results = await asyncio.gather(*tasks)
-        return [r for r in results if r]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        feed = []
+        for vid, r in zip(video_ids, results):
+            if isinstance(r, Exception):
+                print(f"[{vid}] FAILED: {r}", flush=True)
+            elif r:
+                feed.append(r)
+        return feed
