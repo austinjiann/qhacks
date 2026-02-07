@@ -5,10 +5,8 @@ import time
 from typing import Optional
 
 import aiohttp
-import firebase_admin
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-from firebase_admin import credentials, firestore
 from openai import AsyncOpenAI
 
 from utils.env import settings
@@ -36,8 +34,6 @@ class FeedService:
         self.youtube_api_key = settings.YOUTUBE_API_KEY
         self.kalshi_api_key = settings.KALSHI_API_KEY
         self.kalshi_private_key = self._load_private_key()
-        self.db = firestore.client()
-        self.cache_collection = self.db.collection("video_matches")
 
     def _load_private_key(self):
         with open(settings.KALSHI_PRIVATE_KEY_PATH, "rb") as f:
@@ -138,8 +134,12 @@ class FeedService:
                 headers=self._get_kalshi_headers("GET", path),
             ) as response:
                 if response.status != 200:
+                    print(f"[metadata] Failed to get metadata for {event_ticker}: {response.status}")
                     return {}
                 data = await response.json()
+                print(f"[metadata] Raw response for {event_ticker}: {data}")
+                if "event_metadata" in data:
+                    return data["event_metadata"]
                 return data
 
     async def get_video_metadata(self, video_id: str) -> dict:
@@ -253,27 +253,7 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                 "outcome": yes_sub_title.split(",")[0].replace("yes ", "") if yes_sub_title else "",
             }
 
-    def _get_cached(self, video_id: str) -> Optional[dict]:
-        try:
-            doc = self.cache_collection.document(video_id).get()
-            if doc.exists:
-                return doc.to_dict()
-        except Exception as e:
-            print(f"[{video_id}] Cache read error: {e}")
-        return None
-
-    def _set_cached(self, video_id: str, data: dict) -> None:
-        try:
-            self.cache_collection.document(video_id).set(data)
-        except Exception as e:
-            print(f"[{video_id}] Cache write error: {e}")
-
     async def match_video(self, video_id: str) -> Optional[dict]:
-        cached = self._get_cached(video_id)
-        if cached:
-            print(f"[{video_id}] Cache hit")
-            return cached
-
         print(f"[{video_id}] Starting match...")
         metadata = await self.get_video_metadata(video_id)
         print(f"[{video_id}] Title: {metadata.get('title', 'No title')}")
@@ -306,8 +286,9 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                 if event_ticker:
                     try:
                         event_metadata = await self._get_event_metadata(event_ticker)
-                    except Exception:
-                        pass
+                        print(f"[{video_id}] Event metadata: {event_metadata}")
+                    except Exception as e:
+                        print(f"[{video_id}] Failed to get event metadata: {e}")
                 market_image = ""
                 market_details = event_metadata.get("market_details", [])
                 for md in market_details:
@@ -316,7 +297,10 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                         break
                 if not market_image:
                     market_image = event_metadata.get("image_url", "") or event_metadata.get("featured_image_url", "")
-                result = {
+                if not market_image:
+                    market_image = f"https://kalshi.com/api-app/preview/{best_market.get('ticker')}?width=200&height=200"
+                print(f"[{video_id}] Market image: {market_image}")
+                return {
                     "youtube": {
                         "video_id": video_id,
                         "title": metadata["title"],
@@ -325,6 +309,7 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                     },
                     "kalshi": {
                         "ticker": best_market.get("ticker"),
+                        "event_ticker": event_ticker,
                         "question": formatted.get("question", ""),
                         "outcome": formatted.get("outcome", ""),
                         "yes_price": best_market.get("yes_bid", 0),
@@ -334,8 +319,6 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                     },
                     "keywords": keywords,
                 }
-                self._set_cached(video_id, result)
-                return result
 
         events = await self._get_events(status="open", limit=200)
         print(f"[{video_id}] Events fetched: {len(events)}")
@@ -370,8 +353,9 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
         if event_ticker:
             try:
                 event_metadata = await self._get_event_metadata(event_ticker)
-            except Exception:
-                pass
+                print(f"[{video_id}] Event metadata: {event_metadata}")
+            except Exception as e:
+                print(f"[{video_id}] Failed to get event metadata: {e}")
         market_image = ""
         market_details = event_metadata.get("market_details", [])
         for md in market_details:
@@ -380,8 +364,11 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                 break
         if not market_image:
             market_image = event_metadata.get("image_url", "") or event_metadata.get("featured_image_url", "")
+        if not market_image:
+            market_image = f"https://kalshi.com/api-app/preview/{best_market.get('ticker')}?width=200&height=200"
+        print(f"[{video_id}] Market image: {market_image}")
 
-        result = {
+        return {
             "youtube": {
                 "video_id": video_id,
                 "title": metadata["title"],
@@ -390,6 +377,7 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
             },
             "kalshi": {
                 "ticker": best_market.get("ticker"),
+                "event_ticker": event_ticker,
                 "question": formatted.get("question", ""),
                 "outcome": formatted.get("outcome", ""),
                 "yes_price": best_market.get("yes_bid", 0),
@@ -399,8 +387,6 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
             },
             "keywords": keywords,
         }
-        self._set_cached(video_id, result)
-        return result
 
     async def get_feed(self, video_ids: list[str]) -> list[dict]:
         tasks = [self.match_video(vid) for vid in video_ids]

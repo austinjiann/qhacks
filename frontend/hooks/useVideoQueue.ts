@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { QueueItem, FeedItem } from '@/types'
 
 const STORAGE_KEY = 'video_queue'
@@ -31,6 +31,27 @@ function saveToStorage(queue: QueueItem[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(queue))
 }
 
+function withImageRefreshFlags(queue: QueueItem[]): QueueItem[] {
+  let mutated = false
+  const updated = queue.map(item => {
+    if (
+      item.status === 'matched' &&
+      item.result?.kalshi &&
+      !item.result.kalshi.image_url &&
+      !item.needsRefresh
+    ) {
+      mutated = true
+      return {
+        video_id: item.video_id,
+        status: 'pending',
+        needsRefresh: true,
+      }
+    }
+    return item
+  })
+  return mutated ? updated : queue
+}
+
 export function useVideoQueue() {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -42,7 +63,7 @@ export function useVideoQueue() {
     
     const stored = loadFromStorage()
     if (stored.length > 0) {
-      setQueue(stored)
+      setQueue(withImageRefreshFlags(stored))
     } else {
       const initial: QueueItem[] = HARDCODED_VIDEO_IDS.map(id => ({
         video_id: id,
@@ -57,6 +78,38 @@ export function useVideoQueue() {
     if (queue.length > 0) {
       saveToStorage(queue)
     }
+  }, [queue])
+
+  useEffect(() => {
+    if (queue.length === 0) return
+
+    const idsToRefresh = queue
+      .filter(item =>
+        item.status === 'matched' &&
+        item.result?.kalshi &&
+        !item.result.kalshi.image_url
+      )
+      .map(item => item.video_id)
+
+    if (idsToRefresh.length === 0) return
+
+    const refreshSet = new Set(idsToRefresh)
+
+    setQueue(prev => prev.map(item => {
+      if (
+        refreshSet.has(item.video_id) &&
+        item.status === 'matched' &&
+        item.result?.kalshi &&
+        !item.result.kalshi.image_url
+      ) {
+        return {
+          video_id: item.video_id,
+          status: 'pending',
+          needsRefresh: true,
+        }
+      }
+      return item
+    }))
   }, [queue])
 
   const addVideos = useCallback((videoIds: string[]) => {
@@ -84,7 +137,7 @@ export function useVideoQueue() {
       ))
 
       const pendingIds = queue
-        .filter(q => q.status === 'pending' || q.status === 'processing')
+        .filter(q => q.status === 'pending' || q.status === 'processing' || q.needsRefresh)
         .map(q => q.video_id)
         .slice(0, BATCH_SIZE)
 
@@ -106,34 +159,45 @@ export function useVideoQueue() {
         if (pendingIds.includes(item.video_id)) {
           const result = resultsMap.get(item.video_id)
           if (result) {
-            return { ...item, status: 'matched', result }
+            return { ...item, status: 'matched', result, needsRefresh: false }
           }
-          return { ...item, status: 'failed', error: 'No match found' }
+          if (item.status === 'matched' && item.result) {
+            return { ...item, needsRefresh: false }
+          }
+          return { ...item, status: 'failed', error: 'No match found', result: undefined, needsRefresh: false }
         }
         return item
       }))
     } catch (err) {
-      setQueue(prev => prev.map(item => 
-        item.status === 'processing' 
-          ? { ...item, status: 'failed', error: String(err) }
-          : item
-      ))
+      setQueue(prev => prev.map(item => {
+        if (item.status === 'processing') {
+          return { ...item, status: 'failed', error: String(err), needsRefresh: false }
+        }
+        if (item.needsRefresh) {
+          return { ...item, needsRefresh: false }
+        }
+        return item
+      }))
     } finally {
       setIsProcessing(false)
     }
   }, [queue, isProcessing])
 
-  const feedItems = queue
-    .filter(q => q.status === 'matched' && q.result)
-    .map(q => q.result!)
+  const feedItems = useMemo(() => 
+    queue
+      .filter(q => q.status === 'matched' && q.result)
+      .map(q => q.result!),
+    [queue]
+  )
 
-  const stats = {
+  const stats = useMemo(() => ({
     total: queue.length,
     pending: queue.filter(q => q.status === 'pending').length,
     processing: queue.filter(q => q.status === 'processing').length,
     matched: queue.filter(q => q.status === 'matched').length,
     failed: queue.filter(q => q.status === 'failed').length,
-  }
+    refreshPending: queue.filter(q => q.needsRefresh).length,
+  }), [queue])
 
   return {
     queue,

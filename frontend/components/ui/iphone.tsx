@@ -98,8 +98,7 @@ export function Iphone({
             width: `${WIDTH_PCT}%`,
             height: `${HEIGHT_PCT}%`,
             borderRadius: `${RADIUS_H}% / ${RADIUS_V}%`,
-            overflowX: 'hidden',
-            overflowY: 'auto',
+            overflow: 'hidden',
           }}
         >
           {children}

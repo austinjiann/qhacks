@@ -1,54 +1,51 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import { Iphone } from '@/components/ui/iphone'
 import Feed, { FeedRef } from '@/components/Feed'
 import { KalshiMarket } from '@/types'
 import { useVideoQueue } from '@/hooks/useVideoQueue'
+
+const BgWrapper = ({ children, className = '' }: { children: ReactNode, className?: string }) => (
+  <div className={`relative min-h-screen overflow-hidden ${className}`}>
+    <div 
+      className="absolute inset-0 -z-10"
+      style={{
+        backgroundImage: 'url(/bg.jpeg)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        filter: 'blur(4px) brightness(0.5)',
+        transform: 'scale(1.02)',
+      }}
+    />
+    {children}
+  </div>
+)
 
 export default function Home() {
   const { feedItems, stats, isProcessing, processQueue } = useVideoQueue()
   const [currentMarket, setCurrentMarket] = useState<KalshiMarket | undefined>(undefined)
   const [showBetModal, setShowBetModal] = useState(false)
   const feedRef = useRef<FeedRef>(null)
-  const hasProcessed = useRef(false)
 
   useEffect(() => {
-    if (stats.pending > 0 && !isProcessing && !hasProcessed.current) {
-      hasProcessed.current = true
+    if ((stats.pending > 0 || stats.refreshPending > 0) && !isProcessing) {
       processQueue()
     }
-  }, [stats.pending, isProcessing, processQueue])
-
-  useEffect(() => {
-    if (feedItems.length > 0 && feedItems[0]?.kalshi && !currentMarket) {
-      setCurrentMarket(feedItems[0].kalshi)
-    }
-  }, [feedItems, currentMarket])
+  }, [stats.pending, stats.refreshPending, isProcessing, processQueue])
 
   const handleBet = (side: 'YES' | 'NO') => {
     console.log(`Bet placed: ${side} on ${currentMarket?.ticker}`)
     setShowBetModal(false)
   }
 
-  const progress = stats.total > 0 ? ((stats.matched + stats.failed) / stats.total) * 100 : 0
+  const handleCurrentItemChange = useCallback((item: { kalshi?: KalshiMarket }) => {
+    setCurrentMarket(item.kalshi)
+  }, [])
 
-  const BgWrapper = ({ children, className = '' }: { children: React.ReactNode, className?: string }) => (
-    <div className={`relative min-h-screen overflow-hidden ${className}`}>
-      <div 
-        className="absolute inset-0 -z-10"
-        style={{
-          backgroundImage: 'url(/bg.jpeg)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          filter: 'blur(4px) brightness(0.5)',
-          transform: 'scale(1.02)',
-        }}
-      />
-      {children}
-    </div>
-  )
+  const progress = stats.total > 0 ? ((stats.matched + stats.failed) / stats.total) * 100 : 0
 
   if (stats.total === 0) {
     return (
@@ -58,7 +55,7 @@ export default function Home() {
     )
   }
 
-  if (isProcessing || stats.pending > 0 || stats.processing > 0) {
+  if (isProcessing || stats.pending > 0 || stats.processing > 0 || stats.refreshPending > 0) {
     return (
       <BgWrapper className="flex items-center justify-center">
         <div 
@@ -85,6 +82,9 @@ export default function Home() {
             <span>{stats.processing} processing</span>
             <span>{stats.pending} pending</span>
             {stats.failed > 0 && <span className="text-red-400">{stats.failed} failed</span>}
+            {stats.refreshPending > 0 && (
+              <span className="text-emerald-300">Refreshing images</span>
+            )}
           </div>
         </div>
       </BgWrapper>
@@ -132,7 +132,7 @@ export default function Home() {
         </div>
 
         <Iphone className="w-[380px]" frameColor="#1a1a1a">
-          <Feed ref={feedRef} items={feedItems} onCurrentItemChange={(item) => setCurrentMarket(item.kalshi)} />
+          <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} />
         </Iphone>
         
         {currentMarket && (
@@ -170,14 +170,22 @@ export default function Home() {
           >
             <div className="p-6">
               <div className="flex items-start gap-4 mb-6">
-                <div 
-                  className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: 'rgba(255,255,255,0.15)' }}
-                >
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-emerald-300">
-                    <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/>
-                  </svg>
-                </div>
+                {currentMarket.image_url ? (
+                  <img 
+                    src={currentMarket.image_url} 
+                    alt="" 
+                    className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div 
+                    className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: 'rgba(255,255,255,0.15)' }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-emerald-300">
+                      <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/>
+                    </svg>
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <p className="text-emerald-100/80 text-base leading-relaxed">
                     {currentMarket.question}
@@ -235,18 +243,17 @@ export default function Home() {
 
               <div className="flex items-center justify-between text-emerald-200/50 text-sm">
                 <span>Powered by Kalshi</span>
-                <div className="flex gap-3">
-                  <button className="hover:text-white transition-colors">
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                      <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
-                    </svg>
-                  </button>
-                  <button className="hover:text-white transition-colors">
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                      <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
-                    </svg>
-                  </button>
-                </div>
+                <a 
+                  href={`https://kalshi.com/events/${currentMarket.event_ticker || currentMarket.ticker}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 hover:text-white transition-colors"
+                >
+                  <span>View on Kalshi</span>
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                    <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
+                  </svg>
+                </a>
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
 export interface KalshiMarket {
   ticker: string
+  event_ticker?: string
   question: string
   outcome: string
   yes_price: number
@@ -43,4 +44,5 @@ export interface QueueItem {
   status: QueueItemStatus
   result?: FeedItem
   error?: string
+  needsRefresh?: boolean
 }
