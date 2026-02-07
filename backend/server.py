@@ -17,7 +17,6 @@ app.use_cors(
     allow_headers="*",
 )
 
-
 # test routes
 
 @app.router.get("/")

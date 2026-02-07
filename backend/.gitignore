@@ -115,3 +115,4 @@ Thumbs.db
 
 # Local configuration
 *.local
+firebase-service-account.json
