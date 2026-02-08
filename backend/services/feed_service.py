@@ -278,6 +278,41 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
         finally:
             await self.kalshi_service.close_session()
 
+    async def get_bet_advice(
+        self,
+        question: str,
+        side: str,
+        amount: float,
+        yes_price: float,
+        no_price: float,
+    ) -> str:
+        price = yes_price if side.upper() == "YES" else no_price
+        prompt = f"""You are Joe, a friendly and slightly sarcastic betting advisor. Keep it very brief.
+
+Format: One short sentence (max 15 words), then exactly 3 bullet points (each max 10 words). Use this exact format:
+<sentence>
+- <point 1>
+- <point 2>
+- <point 3>
+
+Market: {question}
+Bet side: {side}
+Amount: ${amount}
+Current odds: {side} at {price}¢
+
+Give your quick take. Be casual and fun."""
+
+        try:
+            response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.8,
+                max_tokens=200,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            return f"Hmm, I'm having trouble thinking right now... but betting ${amount} on {side}? Just make sure you're okay losing it!"
+
     async def get_candlesticks(
         self,
         series_ticker: str,

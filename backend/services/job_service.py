@@ -1,15 +1,16 @@
 import asyncio
 import json
 import logging
+import os
+import shutil
+import tempfile
 import traceback
 import uuid
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
-
-import aiohttp
 from google.cloud import storage
-
+import aiohttp
 from models.job import JobStatus, VideoJobRequest
 from services.vertex_service import VertexService
 from utils.env import settings
@@ -103,6 +104,30 @@ class JobService:
                 logger.error(f"Failed to initialize GCS job persistence: {exc}")
         else:
             logger.warning("GOOGLE_CLOUD_BUCKET_NAME not set - job persistence disabled")
+        
+        self._bucket_cache: dict[str, storage.Bucket] = {}
+
+    def _split_gs_uri(self, gs_uri: str) -> tuple[str, str] | None:
+        if not gs_uri or not gs_uri.startswith("gs://"):
+            return None
+        path = gs_uri[5:]
+        if "/" not in path:
+            return None
+        bucket_name, blob_name = path.split("/", 1)
+        if not bucket_name or not blob_name:
+            return None
+        return bucket_name, blob_name
+
+    def _get_bucket(self, bucket_name: str) -> Optional[storage.Bucket]:
+        if not bucket_name or not self.storage_client:
+            return None
+        if self.bucket and self.bucket.name == bucket_name:
+            return self.bucket
+        if bucket_name in self._bucket_cache:
+            return self._bucket_cache[bucket_name]
+        bucket = self.storage_client.bucket(bucket_name)
+        self._bucket_cache[bucket_name] = bucket
+        return bucket
 
     def _image_blob_path(self, job_id: str, image_num: int) -> str:
         return f"images/{job_id}/image{image_num}.png"

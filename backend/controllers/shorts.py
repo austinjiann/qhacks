@@ -56,7 +56,25 @@ class Shorts(APIController):
             return json({"candlesticks": candlesticks})
         except Exception as e:
             return json({"error": str(e)}, status=500)
-
+        
+    @post("/advice")
+    async def get_advice(self, request: Request):
+        try:
+            data = await request.json()
+        except Exception:
+            return json({"error": "Invalid JSON body"}, status=400)
+        question = data.get("question", "")
+        side = data.get("side", "YES")
+        amount = data.get("amount", 0)
+        yes_price = data.get("yes_price", 50)
+        no_price = data.get("no_price", 50)
+        if not question:
+            return json({"error": "question is required"}, status=400)
+        advice = await self.feed_service.get_bet_advice(
+            question, side, amount, yes_price, no_price
+        )
+        return json({"advice": advice})
+    
     @get("/feed")
     async def get_feed(self, video_ids: str = "", limit: int = 10):
         if not video_ids:
