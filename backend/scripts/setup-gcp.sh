@@ -48,7 +48,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --condition=None
 
 echo "💾 Downloading service account key..."
-KEY_FILE="gcp-service-account.json"
+KEY_FILE="firebase-service-account.json"
 gcloud iam service-accounts keys create $KEY_FILE \
   --iam-account=$SERVICE_ACCOUNT_EMAIL
 

@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Veo Sandbox</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; color: #ccc; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px; padding: 20px; }
+  h1 { color: #fff; font-size: 20px; margin-bottom: 20px; }
+  .row { display: flex; gap: 20px; }
+  .col { flex: 1; min-width: 0; }
+  label { display: block; color: #888; font-size: 12px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+  textarea, select, input[type="text"], input[type="number"] {
+    width: 100%; background: #1a1a1a; color: #eee; border: 1px solid #333; border-radius: 4px;
+    padding: 8px 10px; font-family: inherit; font-size: 13px; outline: none;
+  }
+  textarea:focus, select:focus, input:focus { border-color: #555; }
+  textarea { resize: vertical; min-height: 120px; }
+  button {
+    background: #2563eb; color: #fff; border: none; border-radius: 4px; padding: 10px 24px;
+    font-family: inherit; font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .upload-zone {
+    border: 2px dashed #333; border-radius: 6px; padding: 20px; text-align: center;
+    cursor: pointer; transition: border-color 0.2s; min-height: 80px; position: relative;
+  }
+  .upload-zone:hover, .upload-zone.drag { border-color: #2563eb; }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .previews { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .previews .thumb {
+    width: 80px; height: 80px; border-radius: 4px; object-fit: cover; border: 1px solid #333;
+    cursor: pointer; position: relative;
+  }
+  .previews .thumb-wrap { position: relative; display: inline-block; }
+  .previews .thumb-wrap .remove {
+    position: absolute; top: -6px; right: -6px; background: #ef4444; color: #fff;
+    border: none; border-radius: 50%; width: 18px; height: 18px; font-size: 11px;
+    cursor: pointer; line-height: 18px; text-align: center; padding: 0;
+  }
+  .settings { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin: 16px 0; }
+  .settings > div { min-width: 120px; }
+  .check-row { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
+  .check-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; text-transform: none; letter-spacing: 0; color: #ccc; font-size: 13px; }
+  .check-row input[type="checkbox"] { accent-color: #2563eb; }
+  .section { margin-bottom: 20px; }
+  .result-box {
+    background: #111; border: 1px solid #222; border-radius: 6px; padding: 16px; margin-top: 16px;
+  }
+  .status { font-size: 13px; color: #888; margin-bottom: 8px; }
+  .status.done { color: #22c55e; }
+  .status.error { color: #ef4444; }
+  .status.processing { color: #eab308; }
+  .prompt-display {
+    background: #0d0d0d; border: 1px solid #222; border-radius: 4px; padding: 10px;
+    font-size: 12px; color: #999; white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+    margin-top: 8px;
+  }
+  video { width: 100%; max-height: 600px; border-radius: 6px; margin-top: 12px; background: #000; }
+  .toggle-btn {
+    background: none; border: none; color: #2563eb; cursor: pointer; font-size: 12px;
+    padding: 0; font-family: inherit; text-decoration: underline;
+  }
+  hr { border: none; border-top: 1px solid #222; margin: 20px 0; }
+  .jobs-list { margin-top: 12px; }
+  .job-item {
+    display: flex; align-items: center; gap: 10px; padding: 8px; background: #111;
+    border: 1px solid #222; border-radius: 4px; margin-bottom: 6px; cursor: pointer;
+  }
+  .job-item:hover { border-color: #444; }
+  .job-item .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.processing { background: #eab308; }
+  .dot.done { background: #22c55e; }
+  .dot.error { background: #ef4444; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #333; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hint { color: #555; font-size: 11px; margin-top: 4px; }
+  .director-settings {
+    display: none; margin: 8px 0 0 24px; padding: 10px; background: #151515;
+    border: 1px solid #2563eb33; border-radius: 4px;
+  }
+  .director-settings.visible { display: flex; gap: 12px; align-items: end; }
+  .director-settings > div { min-width: 100px; }
+  .storyboard {
+    display: flex; gap: 0; align-items: stretch; overflow-x: auto; padding: 12px 0;
+  }
+  .storyboard .shot-card {
+    flex: 0 0 220px; background: #151515; border: 1px solid #333; border-radius: 6px;
+    padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .storyboard .shot-arrow {
+    flex: 0 0 32px; display: flex; align-items: center; justify-content: center;
+    color: #555; font-size: 20px;
+  }
+  .shot-card .shot-label { color: #fff; font-size: 13px; font-weight: 600; }
+  .shot-card .shot-meta { color: #666; font-size: 11px; }
+  .shot-card video { width: 100%; border-radius: 4px; background: #000; }
+  .stitch-btn {
+    background: #16a34a; color: #fff; border: none; border-radius: 4px; padding: 8px 16px;
+    font-family: inherit; font-size: 12px; cursor: pointer; font-weight: 600; white-space: nowrap;
+  }
+  .stitch-btn:hover { background: #15803d; }
+  .stitch-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<h1>VEO SANDBOX</h1>
+
+<div class="row">
+  <!-- LEFT: Inputs -->
+  <div class="col" style="max-width: 480px;">
+
+    <div class="section">
+      <label>Reference Images (up to 3)</label>
+      <div class="upload-zone" id="refZone">
+        <input type="file" id="refInput" multiple accept="image/*">
+        Drop images or click to upload
+      </div>
+      <div class="previews" id="refPreviews"></div>
+      <div class="hint">Gemini analyzes these → descriptions go into prompt. Images sent as ASSET references to Veo for real faces. 4K output.</div>
+    </div>
+
+    <div class="section">
+      <label>Prompt</label>
+      <textarea id="prompt" rows="10">Explosive 8-second NFL action sequence. Sam Darnold #14 in Seattle Seahawks navy blue and neon green jersey, full helmet with facemask, drops back hard in the pocket — stadium floods blazing overhead. He plants his back foot, rifles a bullet spiral downfield to Jaxon Smith-Njigba cutting across the middle at full speed. The ball rips through the air on a tight descending arc obeying real gravity, JSN snags it at chest height in stride without breaking pace, jukes one defender with a violent cut, and explodes into the end zone. The entire 8 seconds is nonstop motion — every single frame has action happening. Fast cuts between angles, handheld camera shake on the throw, whip pan tracking the ball flight, low angle hero shot as JSN crosses the goal line. Stadium erupts.</textarea>
+    </div>
+
+    <div class="settings">
+      <div>
+        <label>Model</label>
+        <select id="model">
+          <option value="veo-3.1-generate-preview">veo-3.1-preview</option>
+          <option value="veo-3.1-generate-001">veo-3.1-001</option>
+          <option value="veo-3.1-fast-generate-preview">veo-3.1-fast-preview</option>
+          <option value="veo-3.0-generate-001">veo-3.0-001</option>
+          <option value="veo-2.0-generate-001">veo-2.0-001</option>
+        </select>
+      </div>
+      <div>
+        <label>Aspect Ratio</label>
+        <select id="aspect">
+          <option value="9:16">9:16 (vertical)</option>
+          <option value="16:9" selected>16:9 (landscape)</option>
+          <option value="1:1">1:1 (square)</option>
+        </select>
+      </div>
+      <div>
+        <label>Duration</label>
+        <select id="duration">
+          <option value="5">5 seconds</option>
+          <option value="8" selected>8 seconds</option>
+        </select>
+      </div>
+      <div>
+        <label>Persons</label>
+        <select id="persons">
+          <option value="allow_adult">Allow Adult</option>
+          <option value="allow_all">Allow All</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="check-row">
+      <label><input type="checkbox" id="imagenFrame"> Imagen starting frame (disables ref images)</label>
+      <label><input type="checkbox" id="geminiEnhance" checked> Enhance prompt (Gemini)</label>
+      <label><input type="checkbox" id="veoEnhance" checked> Veo enhance</label>
+      <label><input type="checkbox" id="audio"> Generate audio</label>
+      <label><input type="checkbox" id="directorMode" onchange="toggleDirectorSettings()"> Director Mode (multi-clip)</label>
+    </div>
+    <div class="director-settings" id="directorSettings">
+      <div>
+        <label>Shots</label>
+        <select id="numShots">
+          <option value="3">3 shots</option>
+          <option value="4" selected>4 shots</option>
+          <option value="5">5 shots</option>
+        </select>
+      </div>
+      <div>
+        <label>Duration / Shot</label>
+        <select id="durationPerShot">
+          <option value="5">5 seconds</option>
+          <option value="8" selected>8 seconds</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
+      <button class="toggle-btn" onclick="document.getElementById('negWrap').style.display = document.getElementById('negWrap').style.display === 'none' ? 'block' : 'none'">Negative prompt...</button>
+      <div id="negWrap" style="display:none; margin-top: 6px;">
+        <textarea id="negPrompt" rows="3">text, captions, subtitles, watermarks, logos, UI overlays, low quality, blurry, static shot, slideshow, reverse motion, floating objects, zero gravity, objects defying physics, identity drift, face morphing, extra limbs, merged bodies, teleporting players</textarea>
+      </div>
+    </div>
+
+    <button id="genBtn" onclick="generate()">GENERATE</button>
+
+  </div>
+
+  <!-- RIGHT: Results -->
+  <div class="col">
+    <div id="results"></div>
+
+    <hr>
+    <label>Jobs</label>
+    <div class="jobs-list" id="jobsList"></div>
+  </div>
+</div>
+
+<script>
+let refFiles = [];
+const pollers = {};
+
+// --- File Upload ---
+const zone = document.getElementById('refZone');
+const input = document.getElementById('refInput');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', e => {
+  e.preventDefault(); zone.classList.remove('drag');
+  addRefFiles(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/')));
+});
+input.addEventListener('change', () => { addRefFiles(Array.from(input.files)); input.value = ''; });
+
+function addRefFiles(files) {
+  refFiles = refFiles.concat(files).slice(0, 3);
+  renderPreviews();
+}
+
+function renderPreviews() {
+  const c = document.getElementById('refPreviews');
+  c.innerHTML = '';
+  refFiles.forEach((f, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb-wrap';
+    const img = document.createElement('img');
+    img.className = 'thumb';
+    img.src = URL.createObjectURL(f);
+    img.title = f.name;
+    const rm = document.createElement('button');
+    rm.className = 'remove';
+    rm.textContent = 'x';
+    rm.onclick = () => { refFiles.splice(i, 1); renderPreviews(); };
+    wrap.appendChild(img);
+    wrap.appendChild(rm);
+    c.appendChild(wrap);
+  });
+}
+
+// --- Director Mode Toggle ---
+function toggleDirectorSettings() {
+  const on = document.getElementById('directorMode').checked;
+  document.getElementById('directorSettings').classList.toggle('visible', on);
+}
+
+// --- Generate ---
+async function generate() {
+  const prompt = document.getElementById('prompt').value.trim();
+  if (!prompt) return alert('Enter a prompt');
+
+  const isDirector = document.getElementById('directorMode').checked;
+  const btn = document.getElementById('genBtn');
+  btn.disabled = true;
+  btn.textContent = isDirector ? 'DECOMPOSING SHOTS...' : 'SUBMITTING...';
+
+  const fd = new FormData();
+  fd.append('prompt', prompt);
+  fd.append('model', document.getElementById('model').value);
+  fd.append('aspect_ratio', document.getElementById('aspect').value);
+  fd.append('person_generation', document.getElementById('persons').value);
+  fd.append('gemini_enhance', document.getElementById('geminiEnhance').checked);
+  fd.append('veo_enhance', document.getElementById('veoEnhance').checked);
+  fd.append('generate_audio', document.getElementById('audio').checked);
+  fd.append('negative_prompt', document.getElementById('negPrompt').value);
+
+  for (const f of refFiles) fd.append('images', f);
+
+  if (isDirector) {
+    fd.append('num_shots', document.getElementById('numShots').value);
+    fd.append('duration_per_shot', document.getElementById('durationPerShot').value);
+
+    try {
+      const res = await fetch('/api/director', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+      btn.textContent = 'GENERATE';
+      btn.disabled = false;
+
+      addSequenceResult(data.sequence_id, data.shots);
+      startSequencePolling(data.sequence_id);
+    } catch (e) {
+      btn.textContent = 'GENERATE';
+      btn.disabled = false;
+      alert('Error: ' + e.message);
+    }
+  } else {
+    fd.append('duration', document.getElementById('duration').value);
+    fd.append('imagen_frame', document.getElementById('imagenFrame').checked);
+    fd.append('use_first_as_frame', false);
+
+    try {
+      const res = await fetch('/api/generate', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+      btn.textContent = 'GENERATE';
+      btn.disabled = false;
+
+      addJobResult(data.job_id, data.enhanced_prompt);
+      startPolling(data.job_id);
+    } catch (e) {
+      btn.textContent = 'GENERATE';
+      btn.disabled = false;
+      alert('Error: ' + e.message);
+    }
+  }
+}
+
+// --- Results ---
+function addJobResult(jobId, enhancedPrompt) {
+  const results = document.getElementById('results');
+  const box = document.createElement('div');
+  box.className = 'result-box';
+  box.id = 'result-' + jobId;
+  box.innerHTML = `
+    <div class="status processing" id="status-${jobId}"><span class="spinner"></span> Processing... (${jobId})</div>
+    <div>
+      <button class="toggle-btn" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">Show enhanced prompt</button>
+      <div class="prompt-display" style="display:none">${esc(enhancedPrompt)}</div>
+    </div>
+    <div id="video-${jobId}"></div>
+  `;
+  results.prepend(box);
+  updateJobsList();
+}
+
+function startPolling(jobId) {
+  if (pollers[jobId]) return;
+  pollers[jobId] = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/status/${jobId}`);
+      const data = await res.json();
+      const el = document.getElementById('status-' + jobId);
+
+      if (data.status === 'done') {
+        clearInterval(pollers[jobId]);
+        delete pollers[jobId];
+        el.className = 'status done';
+        el.textContent = 'Done (' + jobId + ')';
+        const vc = document.getElementById('video-' + jobId);
+        vc.innerHTML = `
+          <video controls autoplay loop src="${data.video_url}"></video>
+          <div style="margin-top:8px">
+            <a href="${data.video_url}" download="veo-${jobId}.mp4" style="color:#2563eb">Download</a>
+          </div>
+        `;
+        updateJobsList();
+      } else if (data.status === 'error') {
+        clearInterval(pollers[jobId]);
+        delete pollers[jobId];
+        el.className = 'status error';
+        el.textContent = 'Error: ' + (data.error || 'unknown') + ' (' + jobId + ')';
+        updateJobsList();
+      }
+    } catch (e) {
+      console.error('Poll error:', e);
+    }
+  }, 5000);
+}
+
+// --- Director Mode: Storyboard ---
+function addSequenceResult(seqId, shots) {
+  const results = document.getElementById('results');
+  const box = document.createElement('div');
+  box.className = 'result-box';
+  box.id = 'seq-' + seqId;
+
+  let header = `
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="status processing" id="seq-status-${seqId}" style="flex:1"><span class="spinner"></span> Director Mode — ${shots.length} shots (${seqId})</div>
+      <button id="stitch-btn-${seqId}" class="stitch-btn" onclick="stitchSequence('${seqId}')" disabled style="display:none">STITCH ALL</button>
+    </div>`;
+  let storyboard = '<div class="storyboard">';
+
+  shots.forEach((shot, i) => {
+    if (i > 0) storyboard += '<div class="shot-arrow">&#x2192;</div>';
+    storyboard += `
+      <div class="shot-card" id="shot-${seqId}-${i}">
+        <div class="shot-label">${esc(shot.shot_label || ('Shot ' + (i+1)))}</div>
+        <div class="shot-meta">${esc(shot.camera || '')}</div>
+        <div class="status processing" id="shot-status-${seqId}-${i}"><span class="spinner"></span> Processing...</div>
+        <div>
+          <button class="toggle-btn" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">Show prompt</button>
+          <div class="prompt-display" style="display:none">${esc(shot.prompt || '')}</div>
+        </div>
+        <div id="shot-video-${seqId}-${i}"></div>
+      </div>
+    `;
+  });
+
+  storyboard += '</div>';
+  box.innerHTML = header + storyboard;
+  results.prepend(box);
+  updateJobsList();
+}
+
+const seqPollers = {};
+
+function startSequencePolling(seqId) {
+  if (seqPollers[seqId]) return;
+  seqPollers[seqId] = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/sequence/${seqId}`);
+      const data = await res.json();
+
+      data.shots.forEach((shot, i) => {
+        const statusEl = document.getElementById(`shot-status-${seqId}-${i}`);
+        const videoEl = document.getElementById(`shot-video-${seqId}-${i}`);
+        if (!statusEl) return;
+
+        if (shot.status === 'done' && shot.video_url) {
+          statusEl.className = 'status done';
+          statusEl.textContent = 'Done';
+          if (!videoEl.querySelector('video')) {
+            videoEl.innerHTML = `
+              <video controls autoplay loop src="${shot.video_url}" style="width:100%;max-height:300px"></video>
+              <div style="margin-top:4px">
+                <a href="${shot.video_url}" download="shot-${i+1}.mp4" style="color:#2563eb;font-size:11px">Download</a>
+              </div>
+            `;
+          }
+        } else if (shot.status === 'error') {
+          statusEl.className = 'status error';
+          statusEl.textContent = 'Error: ' + (shot.error || 'unknown');
+        }
+      });
+
+      const seqStatus = document.getElementById(`seq-status-${seqId}`);
+      if (data.status === 'done') {
+        clearInterval(seqPollers[seqId]);
+        delete seqPollers[seqId];
+        seqStatus.className = 'status done';
+        seqStatus.textContent = `Director Mode — All ${data.shots.length} shots complete (${seqId})`;
+        const stitchBtn = document.getElementById('stitch-btn-' + seqId);
+        if (stitchBtn) { stitchBtn.style.display = ''; stitchBtn.disabled = false; }
+        updateJobsList();
+      } else if (data.status === 'error') {
+        clearInterval(seqPollers[seqId]);
+        delete seqPollers[seqId];
+        const doneCount = data.shots.filter(s => s.status === 'done').length;
+        seqStatus.className = 'status error';
+        seqStatus.textContent = `Director Mode — ${doneCount}/${data.shots.length} shots complete, some errors (${seqId})`;
+        if (doneCount >= 2) {
+          const stitchBtn = document.getElementById('stitch-btn-' + seqId);
+          if (stitchBtn) { stitchBtn.style.display = ''; stitchBtn.disabled = false; stitchBtn.textContent = `STITCH ${doneCount} SHOTS`; }
+        }
+        updateJobsList();
+      }
+    } catch (e) {
+      console.error('Sequence poll error:', e);
+    }
+  }, 5000);
+}
+
+async function stitchSequence(seqId) {
+  const btn = document.getElementById('stitch-btn-' + seqId);
+  btn.disabled = true;
+  btn.textContent = 'STITCHING...';
+
+  try {
+    const res = await fetch(`/api/stitch/${seqId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+    btn.textContent = 'STITCHED';
+    btn.style.background = '#22c55e';
+
+    const seqBox = document.getElementById('seq-' + seqId);
+    const stitchedDiv = document.createElement('div');
+    stitchedDiv.style.cssText = 'margin-top:16px;padding:16px;background:#0d0d0d;border:1px solid #22c55e44;border-radius:6px';
+    stitchedDiv.innerHTML = `
+      <div style="color:#22c55e;font-size:13px;font-weight:600;margin-bottom:8px">Stitched Video (${data.shots_included} shots)</div>
+      <video controls autoplay src="${data.video_url}" style="width:100%;max-height:500px;border-radius:4px;background:#000"></video>
+      <div style="margin-top:8px">
+        <a href="${data.video_url}" download="director-${seqId}-stitched.mp4" style="color:#2563eb;font-size:12px">Download stitched video</a>
+      </div>
+    `;
+    seqBox.appendChild(stitchedDiv);
+  } catch (e) {
+    btn.textContent = 'STITCH FAILED';
+    btn.style.background = '#ef4444';
+    alert('Stitch error: ' + e.message);
+    setTimeout(() => { btn.textContent = 'STITCH ALL'; btn.style.background = ''; btn.disabled = false; }, 3000);
+  }
+}
+
+function updateJobsList() {
+  fetch('/api/jobs').then(r => r.json()).then(data => {
+    const c = document.getElementById('jobsList');
+    c.innerHTML = '';
+    for (const [id, j] of Object.entries(data)) {
+      const item = document.createElement('div');
+      item.className = 'job-item';
+      item.innerHTML = `<span class="dot ${j.status}"></span><span>${id}</span><span style="color:#666;font-size:12px">${j.model} — ${j.status}</span>`;
+      item.onclick = () => {
+        const el = document.getElementById('result-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      };
+      c.appendChild(item);
+    }
+  });
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+</script>
+
+</body>
+</html>

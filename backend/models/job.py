@@ -8,9 +8,7 @@ class VideoJobRequest:
     title: str
     outcome: str
     original_bet_link: str
-    duration_seconds: int = 8
     source_image_url: Optional[str] = None  # Optional real image to use as base
-    reference_image_urls: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -20,7 +18,6 @@ class WorkerJobPayload:
     title: str
     outcome: str
     original_bet_link: str
-    duration_seconds: int = 8
 
 
 @dataclass

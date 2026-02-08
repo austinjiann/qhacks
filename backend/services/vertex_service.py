@@ -2,6 +2,7 @@ import logging
 
 from google import genai
 from google.genai.types import (
+    GenerateImagesConfig,
     GenerateVideosConfig,
     GenerateVideosOperation,
     Image,
@@ -10,7 +11,6 @@ from models.job import JobStatus
 from utils.env import settings
 
 logger = logging.getLogger("vertex_service")
-MAX_REFERENCE_IMAGES = 3
 
 
 def _infer_mime_type(image_bytes: bytes) -> str:
@@ -35,33 +35,39 @@ class VertexService:
         self.bucket_name = settings.GOOGLE_CLOUD_BUCKET_NAME
         logger.info(f"VertexService initialized, output bucket: {self.bucket_name}")
 
+    async def generate_starting_frame(self, prompt: str) -> bytes | None:
+        """Generate a starting frame image using Gemini Imagen."""
+        logger.info("Generating starting frame via Imagen...")
+        try:
+            response = self.client.models.generate_images(
+                model="imagen-3.0-generate-002",
+                prompt=prompt,
+                config=GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio="9:16",
+                    output_mime_type="image/png",
+                ),
+            )
+            if response.generated_images:
+                image_bytes = response.generated_images[0].image.image_bytes
+                logger.info(f"Starting frame generated ({len(image_bytes)} bytes)")
+                return image_bytes
+            logger.warning("Imagen returned no images")
+        except Exception as exc:
+            logger.error(f"Starting frame generation failed: {exc}")
+        return None
+
     async def generate_video_content(
         self,
         prompt: str,
         image_data: bytes | None,
-        duration_seconds: int = 8,
-        reference_images: list[bytes] | None = None,
     ) -> GenerateVideosOperation:
         output_gcs_uri = f"gs://{self.bucket_name}/videos/"
-        ref_payload = []
-        for ref_img in (reference_images or [])[:MAX_REFERENCE_IMAGES]:
-            ref_payload.append(
-                {
-                    "image": Image(
-                        image_bytes=ref_img,
-                        mime_type=_infer_mime_type(ref_img),
-                    ),
-                    "reference_type": "ASSET",
-                }
-            )
-        use_reference_mode = bool(ref_payload)
-        if use_reference_mode and image_data is not None:
-            logger.warning("Both source image and reference images were provided; using reference-image mode only.")
-        if not use_reference_mode and image_data is None:
-            raise ValueError("Either image_data or reference_images must be provided")
+        if image_data is None:
+            raise ValueError("image_data is required for video generation")
         config_kwargs = {
             "aspect_ratio": "9:16",
-            "duration_seconds": duration_seconds,
+            "duration_seconds": 8,
             "output_gcs_uri": output_gcs_uri,
             "negative_prompt": (
                 "text, captions, subtitles, annotations, logos, low quality, static shot, slideshow, "
@@ -73,22 +79,12 @@ class VertexService:
             ),
             "resolution": "4k",
         }
-        if ref_payload:
-            config_kwargs["reference_images"] = ref_payload
         try:
             config = GenerateVideosConfig(**config_kwargs)
         except Exception as exc:
             logger.warning(f"GenerateVideosConfig does not accept resolution on this SDK build: {exc}")
             config_kwargs.pop("resolution", None)
             config = GenerateVideosConfig(**config_kwargs)
-
-        if use_reference_mode:
-            operation = self.client.models.generate_videos(
-                model="veo-3.1-generate-preview",
-                prompt=prompt,
-                config=config,
-            )
-            return operation
 
         image_mime = _infer_mime_type(image_data)
         operation = self.client.models.generate_videos(
@@ -101,17 +97,16 @@ class VertexService:
             config=config,
         )
         return operation
-    
+
     async def get_video_status(self, operation: GenerateVideosOperation) -> JobStatus:
         operation = self.client.operations.get(operation)
         if operation.done and operation.result and operation.result.generated_videos:
             return JobStatus(status="done", job_start_time=None, video_url=operation.result.generated_videos[0].video.uri)
         return JobStatus(status="waiting", job_start_time=None, video_url=None)
-    
+
     async def get_video_status_by_name(self, operation_name: str) -> JobStatus:
         """Get video status by operation name (avoids serialization)"""
         logger.debug(f"get_video_status_by_name: Polling operation {operation_name}")
-        # Create a minimal operation object with just the name since get() expects an operation object
         operation = GenerateVideosOperation(name=operation_name)
         operation = self.client.operations.get(operation)
         logger.debug(f"get_video_status_by_name: done={operation.done}")
@@ -119,7 +114,6 @@ class VertexService:
         if operation.done:
             logger.info(f"get_video_status_by_name: Operation DONE!")
 
-            # Check for error first
             if hasattr(operation, 'error') and operation.error:
                 error_msg = str(operation.error)
                 logger.error(f"get_video_status_by_name: Operation FAILED with error: {error_msg}")

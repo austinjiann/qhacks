@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-multipart
+python-dotenv
+google-genai>=1.62.0
+google-cloud-storage

@@ -13,10 +13,10 @@ from google.cloud import storage
 from models.job import JobStatus, VideoJobRequest
 from services.vertex_service import VertexService
 from utils.env import settings
+from utils.gemini_prompt_builder import create_first_image_prompt
 from utils.veo_prompt_builder import create_video_prompt
 
 logger = logging.getLogger("job_service")
-MAX_REFERENCE_IMAGES = 3
 IMAGE_REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -128,8 +128,6 @@ class JobService:
         if not gs_uri or not gs_uri.startswith("gs://"):
             return None
 
-        # Just use public URL - signed URLs require service account key file
-        # To use this, run: gsutil iam ch allUsers:objectViewer gs://YOUR_BUCKET_NAME
         public_url = f"https://storage.googleapis.com/{gs_uri[5:]}"
         logger.info(f"_generate_signed_url: Using public URL: {public_url}")
         return public_url
@@ -214,9 +212,7 @@ class JobService:
                 "title": request.title,
                 "outcome": request.outcome,
                 "original_bet_link": request.original_bet_link,
-                "duration_seconds": request.duration_seconds,
                 "source_image_url": request.source_image_url,
-                "reference_image_urls": request.reference_image_urls,
             },
         )
 
@@ -224,9 +220,7 @@ class JobService:
             "title": request.title,
             "outcome": request.outcome,
             "original_bet_link": request.original_bet_link,
-            "duration_seconds": request.duration_seconds,
             "source_image_url": request.source_image_url,
-            "reference_image_urls": request.reference_image_urls,
         }
 
         if self.cloud_tasks:
@@ -238,7 +232,7 @@ class JobService:
         return job_id
 
     async def process_video_job(self, job_id: str, job_data: dict):
-        """Process pipeline: source_image -> first_frame -> video"""
+        """Process pipeline: Gemini starting frame -> Veo video"""
         jid = job_id[:8]
         start_time = datetime.now().isoformat()
         existing_job = await self._load_job(job_id)
@@ -249,42 +243,36 @@ class JobService:
             if not outcome:
                 raise ValueError("outcome is required")
             original_bet_link = job_data["original_bet_link"]
-            duration = int(job_data.get("duration_seconds", 8))
             source_image_url = job_data.get("source_image_url")
-            raw_reference_urls = job_data.get("reference_image_urls") or []
-            if isinstance(raw_reference_urls, str):
-                raw_reference_urls = [
-                    u.strip()
-                    for u in raw_reference_urls.replace("\r", "\n").split("\n")
-                    if u.strip()
-                ]
-            reference_image_urls = [u for u in raw_reference_urls if u][:MAX_REFERENCE_IMAGES]
-            reference_images: list[bytes] = []
-            if reference_image_urls:
-                print(f"[{jid}] Fetching {len(reference_image_urls)} reference image(s)...", flush=True)
-                results = await asyncio.gather(*[fetch_image_from_url(url) for url in reference_image_urls])
-                reference_images = [img for img in results if img is not None]
-                print(
-                    f"[{jid}] Loaded {len(reference_images)}/{len(reference_image_urls)} reference image(s)",
-                    flush=True,
-                )
+
+            # Step 1: Get or generate the starting frame
             source_image = None
             if source_image_url:
                 source_image = await fetch_image_from_url(source_image_url)
                 if source_image:
-                    print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
+                    print(f"[{jid}] Using provided source image ({len(source_image)} bytes)", flush=True)
                 else:
-                    print(f"[{jid}] source_image_url could not be fetched; continuing without source image", flush=True)
-            if not source_image and not reference_images:
-                raise ValueError("At least one valid source image or reference image is required")
-            if source_image and reference_images:
-                print(f"[{jid}] Both source and reference images supplied; Veo request will use reference-image mode", flush=True)
+                    print(f"[{jid}] source_image_url could not be fetched; will generate via Gemini", flush=True)
 
+            if not source_image:
+                print(f"[{jid}] Generating starting frame via Gemini...", flush=True)
+                image_prompt = create_first_image_prompt(
+                    title=title,
+                    outcome=outcome,
+                    original_bet_link=original_bet_link,
+                )
+                source_image = await self.vertex_service.generate_starting_frame(image_prompt)
+                if source_image:
+                    print(f"[{jid}] Gemini starting frame generated ({len(source_image)} bytes)", flush=True)
+                else:
+                    raise ValueError("Failed to generate starting frame via Gemini and no source image provided")
+
+            # Step 2: Upload preview image to GCS
             image_uri = ""
-            preview_image = source_image or (reference_images[0] if reference_images else None)
-            if self.bucket and preview_image:
-                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, preview_image)
+            if self.bucket and source_image:
+                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, source_image)
 
+            # Step 3: Build Veo prompt and generate video
             veo_prompt = create_video_prompt(
                 title=title,
                 outcome=outcome,
@@ -292,9 +280,7 @@ class JobService:
             )
             operation = await self.vertex_service.generate_video_content(
                 prompt=veo_prompt,
-                image_data=None if reference_images else source_image,
-                duration_seconds=duration,
-                reference_images=reference_images if reference_images else None,
+                image_data=source_image,
             )
 
             await self._save_job(job_id, {
@@ -304,7 +290,6 @@ class JobService:
                 "title": title,
                 "outcome": outcome,
                 "original_bet_link": original_bet_link,
-                "duration_seconds": duration,
                 "image_uri": image_uri,
             })
             print(f"[{jid}] Video processing started", flush=True)
@@ -318,7 +303,6 @@ class JobService:
                 "title": job_data.get("title"),
                 "outcome": job_data.get("outcome") or job_data.get("caption"),
                 "original_bet_link": job_data.get("original_bet_link"),
-                "duration_seconds": int(job_data.get("duration_seconds", 8)),
             })
 
     async def get_job_status(self, job_id: str) -> Optional[JobStatus]:
