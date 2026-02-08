@@ -63,7 +63,15 @@ const SPEECH_BUBBLE_OFFSET_PX = 48
 
 const easeCubic = [0.22, 1, 0.36, 1] as const
 
-const BgWrapper = ({ children, blurred = true }: { children: ReactNode; blurred?: boolean }) => (
+const BgWrapper = ({
+  children,
+  blurred = true,
+  logoShiftedRight = false,
+}: {
+  children: ReactNode
+  blurred?: boolean
+  logoShiftedRight?: boolean
+}) => (
   <div className="relative min-h-screen overflow-hidden">
     {/* Background layer — blur controlled by prop with CSS transition */}
     <div
@@ -97,10 +105,28 @@ const BgWrapper = ({ children, blurred = true }: { children: ReactNode; blurred?
     <div className="relative z-10 h-screen flex items-center justify-center">
       {children}
     </div>
+    <div
+      className="absolute z-20 pointer-events-none select-none"
+      style={{
+        top: logoShiftedRight ? '8.5%' : '7.0%',
+        left: logoShiftedRight ? '18%' : '1%',
+        transition: 'left 0.8s ease, top 0.8s ease',
+      }}
+    >
+      <Image
+        src="/kalship-logo-white.png"
+        alt="Kalship logo"
+        width={220}
+        height={72}
+        priority
+        className="h-auto w-[min(12vw,220px)] min-w-[150px]"
+        style={{ filter: 'drop-shadow(0 0 10px rgba(74, 201, 151, 0.62)) drop-shadow(0 0 22px rgba(74, 201, 151, 0.38))' }}
+      />
+    </div>
   </div>
 )
 
-function SpeechBubble({ text, large }: { text: string; large?: boolean }) {
+function SpeechBubble({ text, children, large }: { text?: string; children?: ReactNode; large?: boolean }) {
   return (
     <div
       className={`relative bg-white/95 text-gray-900 rounded-2xl font-medium ${
@@ -108,7 +134,7 @@ function SpeechBubble({ text, large }: { text: string; large?: boolean }) {
       }`}
       style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.1)', border: '1px solid rgba(0,0,0,0.12)' }}
     >
-      {text}
+      {children ?? text}
       {/* Triangle pointer at bottom-center */}
       <div
         className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0 h-0"
@@ -493,7 +519,7 @@ export default function Home() {
   )
 
   return (
-    <BgWrapper blurred={stage >= 2}>
+    <BgWrapper blurred={stage >= 2} logoShiftedRight={stage < 2}>
       <div
         className="relative flex items-center justify-center max-h-screen w-full -mt-4 sm:-mt-6 gap-10"
         style={{ fontFamily: 'var(--font-playfair), serif' }}
@@ -523,7 +549,23 @@ export default function Home() {
                       exit={{ opacity: 0, y: SPEECH_BUBBLE_OFFSET_PX - 8, rotate: 2 }}
                       transition={{ duration: 0.35, ease: 'easeOut' }}
                     >
-                      <SpeechBubble text={currentTipText} large={stage < 2} />
+                      {stage === 0 && !waitingForFeed ? (
+                        <SpeechBubble large>
+                          <span className="inline-flex items-center">
+                            <span>Welcome to</span>
+                            <Image
+                              src="/kalship-text.png"
+                              alt="Kalship"
+                              width={200}
+                              height={66}
+                              className="inline-block"
+                              style={{ height: '1em', width: 'auto', marginLeft: '0.4em', verticalAlign: 'middle', transform: 'translateY(0.1em)' }}
+                            />
+                          </span>
+                        </SpeechBubble>
+                      ) : (
+                        <SpeechBubble text={currentTipText} large={stage < 2} />
+                      )}
                     </motion.div>
                   </AnimatePresence>
                 </div>
