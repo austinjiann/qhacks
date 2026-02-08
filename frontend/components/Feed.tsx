@@ -6,7 +6,7 @@ import ShortCard from './ShortCard'
 
 interface FeedProps {
   items: FeedItem[]
-  onCurrentItemChange?: (item: FeedItem) => void
+  onCurrentItemChange?: (item: FeedItem, index: number) => void
   paused?: boolean
 }
 
@@ -45,8 +45,8 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
     setActiveIndex(index)
     const activeItem = itemsRef.current[index]
     if (activeItem) {
-      lastNotifiedVideoRef.current = activeItem.youtube.video_id
-      onCurrentItemChangeRef.current?.(activeItem)
+      lastNotifiedVideoRef.current = activeItem.id
+      onCurrentItemChangeRef.current?.(activeItem, index)
     }
   }, [])
 
@@ -89,18 +89,18 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
       lastNotifiedVideoRef.current = undefined
       return
     }
-    if (lastNotifiedVideoRef.current === activeItem.youtube.video_id) {
+    if (lastNotifiedVideoRef.current === activeItem.id) {
       return
     }
-    lastNotifiedVideoRef.current = activeItem.youtube.video_id
-    onCurrentItemChangeRef.current?.(activeItem)
+    lastNotifiedVideoRef.current = activeItem.id
+    onCurrentItemChangeRef.current?.(activeItem, safeActiveIndex)
   }, [items, safeActiveIndex])
 
   return (
     <div ref={containerRef} className="feed-container">
       {items.map((item, index) => (
         <ShortCard
-          key={item.youtube.video_id}
+          key={item.youtube.video_id || item.id}
           item={item}
           isActive={index === safeActiveIndex && !paused}
           shouldRender={Math.abs(index - safeActiveIndex) <= 1}

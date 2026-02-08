@@ -123,7 +123,8 @@ function SpeechBubble({ text, large }: { text: string; large?: boolean }) {
 }
 
 export default function Home() {
-  const { feedItems, stats, feedError, isProcessing, processQueue, retryFailed, clearQueue } = useVideoQueue()
+  const { feedItems, stats, feedError, isProcessing, processQueue, retryFailed, clearQueue, insertMp4 } = useVideoQueue()
+  const currentIndexRef = useRef(0)
   const [currentMarkets, setCurrentMarkets] = useState<KalshiMarket[]>([])
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [imgError, setImgError] = useState(false)
@@ -394,11 +395,21 @@ export default function Home() {
     return 'loading'
   })()
 
-  const handleBet = (side: 'YES' | 'NO') => {
-    console.log(`Bet placed: ${side} on ${expandedMarket?.ticker}`)
-  }
+  const handleBet = useCallback((side: 'YES' | 'NO') => {
+    if (!expandedMarket) return
+    console.log(`Bet placed: ${side} on ${expandedMarket.ticker}`)
 
-  const handleCurrentItemChange = useCallback((item: { kalshi?: KalshiMarket[] }) => {
+    const keywords = expandedMarket.question
+      .toLowerCase()
+      .replace(/[?.,!]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+
+    insertMp4(currentIndexRef.current, keywords, expandedMarket, side)
+  }, [expandedMarket, insertMp4])
+
+  const handleCurrentItemChange = useCallback((item: { kalshi?: KalshiMarket[] }, index: number) => {
+    currentIndexRef.current = index
     setCurrentMarkets(item.kalshi ?? [])
     setSelectedIdx(0)
     setImgError(false)

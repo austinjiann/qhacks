@@ -17,7 +17,7 @@ const emitMuteChange = () => {
 
 const subscribeToMute = (listener: (value: boolean) => void) => {
   muteListeners.add(listener)
-  return () => muteListeners.delete(listener)
+  return () => { muteListeners.delete(listener) }
 }
 
 interface ShortCardProps {
@@ -27,7 +27,9 @@ interface ShortCardProps {
 }
 
 function ShortCard({ item, isActive, shouldRender = true }: ShortCardProps) {
+  const isMp4 = item.video?.type === 'mp4'
 
+  const videoRef = useRef<HTMLVideoElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const playerReadyRef = useRef(false)
   const activeStateRef = useRef(isActive)
@@ -88,6 +90,18 @@ function ShortCard({ item, isActive, shouldRender = true }: ShortCardProps) {
     }
     return subscribeToMute(handleMuteChange)
   }, [])
+
+  // MP4 play/pause control
+  useEffect(() => {
+    if (!isMp4 || !shouldRender) return
+    const video = videoRef.current
+    if (!video) return
+    if (isActive) {
+      video.play().catch(() => {})
+    } else {
+      video.pause()
+    }
+  }, [isActive, isMp4, shouldRender])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -159,6 +173,43 @@ function ShortCard({ item, isActive, shouldRender = true }: ShortCardProps) {
     )
   }
 
+  if (isMp4 && item.video?.type === 'mp4') {
+    return (
+      <div className="short-card">
+        <div className="video-container">
+          <video
+            ref={videoRef}
+            className="video-iframe"
+            src={item.video.url}
+            autoPlay={isActive}
+            loop
+            muted
+            playsInline
+            style={{ pointerEvents: 'auto', objectFit: 'cover' }}
+          />
+        </div>
+        {item.isInjected && item.injectedByBetSide && (
+          <div style={{
+            position: 'absolute',
+            top: 16,
+            left: 16,
+            zIndex: 15,
+            padding: '4px 12px',
+            borderRadius: 999,
+            background: item.injectedByBetSide === 'YES'
+              ? 'rgba(16, 185, 129, 0.8)'
+              : 'rgba(239, 68, 68, 0.8)',
+            color: '#fff',
+            fontSize: 12,
+            fontWeight: 600,
+          }}>
+            You bet {item.injectedByBetSide}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="short-card">
       <div className="video-container">
@@ -217,7 +268,7 @@ function ShortCard({ item, isActive, shouldRender = true }: ShortCardProps) {
 
 export default memo(ShortCard, (prevProps, nextProps) => {
   return (
-    prevProps.item.youtube.video_id === nextProps.item.youtube.video_id &&
+    prevProps.item.id === nextProps.item.id &&
     prevProps.isActive === nextProps.isActive &&
     prevProps.shouldRender === nextProps.shouldRender
   )
