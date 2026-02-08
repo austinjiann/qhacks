@@ -458,7 +458,7 @@ export default function Home() {
 
   // Phone content shared by both tutorial and feed views
   const phoneContent = feedItems.length > 0 ? (
-    <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} />
+    <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} paused={showKalshiWarning} />
   ) : (
     <div className="flex flex-col items-center justify-center h-full bg-black gap-3 p-4">
       <div className="text-white/30 text-sm">
@@ -749,20 +749,12 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="relative">
-                    {graphStatus !== 'ready' && (
+                    {graphStatus === 'loading' && (
                       <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm rounded-xl pointer-events-none">
-                        {graphStatus === 'loading' ? (
-                          <>
-                            <div className="flex items-center gap-2 text-xs text-white/85">
-                              <span className="inline-block w-4 h-4 border-2 border-white/50 border-t-transparent rounded-full animate-spin" />
-                              Loading market history…
-                            </div>
-                          </>
-                        ) : (
-                          <div className="px-4 py-2 text-xs text-white/75 bg-white/5 rounded-lg border border-white/10">
-                            No price history yet
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2 text-xs text-white/85">
+                          <span className="inline-block w-4 h-4 border-2 border-white/50 border-t-transparent rounded-full animate-spin" />
+                          Loading market history…
+                        </div>
                       </div>
                     )}
                     <PriceChart
@@ -849,23 +841,13 @@ export default function Home() {
                     <div className="flex gap-3">
                       <button
                         onClick={dismissKalshiWarning}
-                        className="px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                        style={{
-                          background: 'rgba(16, 185, 129, 0.25)',
-                          border: '1px solid rgba(16, 185, 129, 0.4)',
-                          color: '#6ee7b7',
-                        }}
+                        className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/40 hover:border-emerald-500/60"
                       >
                         Go Back to Feed
                       </button>
                       <button
                         onClick={proceedToKalshi}
-                        className="px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                        style={{
-                          background: 'rgba(255, 255, 255, 0.08)',
-                          border: '1px solid rgba(255, 255, 255, 0.15)',
-                          color: 'rgba(255, 255, 255, 0.5)',
-                        }}
+                        className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer bg-white/[0.08] border border-white/15 text-white/50 hover:bg-white/20 hover:text-white/70"
                       >
                         Proceed to Kalshi
                       </button>

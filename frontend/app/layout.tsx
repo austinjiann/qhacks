@@ -20,6 +20,17 @@ const playfair = Playfair_Display({
 export const metadata: Metadata = {
   title: "Kalship",
   description: "Scroll to bet",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml", sizes: "any" },
+      { url: "/icon.svg", sizes: "32x32" },
+      { url: "/icon.svg", sizes: "192x192" },
+      { url: "/icon.svg", sizes: "512x512" },
+    ],
+    apple: [
+      { url: "/icon.svg", sizes: "180x180" },
+    ],
+  },
 };
 
 export default function RootLayout({

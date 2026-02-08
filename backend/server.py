@@ -12,9 +12,13 @@ from services.test_service import TestService
 from services.feed_service import FeedService
 from services.job_service import JobService
 from services.vertex_service import VertexService
+from services.youtube_service import YoutubeService
+from services.kalshi_service import KalshiService
 
 services = Container()
 services.add_scoped(TestService)
+services.add_scoped(YoutubeService)
+services.add_scoped(KalshiService)
 services.add_scoped(FeedService)
 services.add_singleton(VertexService)
 services.add_singleton(JobService)

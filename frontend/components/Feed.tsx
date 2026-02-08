@@ -7,6 +7,7 @@ import ShortCard from './ShortCard'
 interface FeedProps {
   items: FeedItem[]
   onCurrentItemChange?: (item: FeedItem) => void
+  paused?: boolean
 }
 
 export interface FeedRef {
@@ -14,7 +15,7 @@ export interface FeedRef {
   scrollToPrev: () => void
 }
 
-const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCurrentItemChange }, ref) {
+const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCurrentItemChange, paused }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const activeIndexRef = useRef(0)
   const onCurrentItemChangeRef = useRef(onCurrentItemChange)
@@ -101,7 +102,7 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
         <ShortCard
           key={item.youtube.video_id}
           item={item}
-          isActive={index === safeActiveIndex}
+          isActive={index === safeActiveIndex && !paused}
           shouldRender={Math.abs(index - safeActiveIndex) <= 1}
         />
       ))}
@@ -110,5 +111,5 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
 })
 
 export default memo(FeedComponent, (prev, next) => {
-  return prev.items === next.items && prev.onCurrentItemChange === next.onCurrentItemChange
+  return prev.items === next.items && prev.onCurrentItemChange === next.onCurrentItemChange && prev.paused === next.paused
 })
