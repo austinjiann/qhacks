@@ -4,6 +4,9 @@ export interface KalshiMarket {
   series_ticker?: string
   question: string
   outcome: string
+  created_time?: string
+  open_time?: string
+  market_start_ts?: number
   yes_price: number
   no_price: number
   volume?: number

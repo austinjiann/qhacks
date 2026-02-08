@@ -1,7 +1,9 @@
 import asyncio
 import base64
 import json
+import re
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -63,6 +65,106 @@ class FeedService:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _to_float(value: object) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _to_cents(cls, cents_value: object = None, dollars_value: object = None) -> Optional[float]:
+        cents = cls._to_float(cents_value)
+        if cents is not None:
+            return cents
+        dollars = cls._to_float(dollars_value)
+        if dollars is None:
+            return None
+        return dollars * 100
+
+    @classmethod
+    def _extract_candle_close_cents(cls, candle: dict) -> Optional[float]:
+        for key in ("price", "yes_bid"):
+            payload = candle.get(key, {})
+            if isinstance(payload, dict):
+                close_cents = cls._to_cents(payload.get("close"), payload.get("close_dollars"))
+                if close_cents is not None:
+                    return close_cents
+
+        synthetic_previous = cls._to_cents(
+            candle.get("previous_price"), candle.get("previous_price_dollars")
+        )
+        if synthetic_previous is not None:
+            return synthetic_previous
+
+        price_payload = candle.get("price", {})
+        if isinstance(price_payload, dict):
+            previous = cls._to_cents(
+                price_payload.get("previous"), price_payload.get("previous_dollars")
+            )
+            if previous is not None:
+                return previous
+
+        return None
+
+    @staticmethod
+    def _parse_iso_timestamp(value: object) -> Optional[int]:
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            numeric = float(value)
+            if numeric <= 0:
+                return None
+            return int(numeric / 1000) if numeric > 10_000_000_000 else int(numeric)
+
+        if not isinstance(value, str):
+            return None
+
+        raw = value.strip()
+        if not raw:
+            return None
+
+        if raw.isdigit():
+            numeric = int(raw)
+            return int(numeric / 1000) if numeric > 10_000_000_000 else numeric
+
+        if raw.endswith("Z"):
+            raw = f"{raw[:-1]}+00:00"
+
+        # Normalize fractional seconds to microseconds for Python's parser.
+        iso_match = re.match(
+            r"^(?P<base>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?P<fraction>\.\d+)?(?P<tz>[+-]\d{2}:\d{2})?$",
+            raw,
+        )
+        if iso_match:
+            base = iso_match.group("base")
+            fraction = iso_match.group("fraction") or ""
+            tz = iso_match.group("tz") or "+00:00"
+            if fraction:
+                fraction_digits = fraction[1:7].ljust(6, "0")
+                raw = f"{base}.{fraction_digits}{tz}"
+            else:
+                raw = f"{base}{tz}"
+
+        try:
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return int(parsed.timestamp())
+        except ValueError:
+            return None
+
+    @classmethod
+    def _get_market_start_ts(cls, market: dict) -> Optional[int]:
+        for field in ("created_time", "open_time"):
+            ts = cls._parse_iso_timestamp(market.get(field))
+            if ts is not None:
+                return ts
+        return None
+
     async def _kalshi_get(self, path: str, url: str, params: dict | None = None) -> dict:
         """Single chokepoint for all Kalshi GET requests with semaphore + retry."""
         headers = self._get_kalshi_headers("GET", path)
@@ -102,6 +204,11 @@ class FeedService:
         params = {"status": status, "limit": limit, "series_ticker": series_ticker}
         data = await self._kalshi_get(path, f"{KALSHI_BASE_URL}/markets", params)
         return data.get("markets", [])
+
+    async def _get_market(self, ticker: str) -> dict:
+        path = f"/trade-api/v2/markets/{ticker}"
+        data = await self._kalshi_get(path, f"{KALSHI_BASE_URL}/markets/{ticker}")
+        return data.get("market", {})
 
     def _detect_series_from_keywords(self, keywords: list[str]) -> Optional[str]:
         keywords_lower = " ".join(keywords).lower()
@@ -203,7 +310,13 @@ class FeedService:
         return best_fallback
 
     async def get_candlesticks(
-        self, series_ticker: str, ticker: str, period_interval: int = 60, hours: int = 24
+        self,
+        series_ticker: str,
+        ticker: str,
+        period_interval: int = 60,
+        hours: int = 24,
+        start_ts: Optional[int] = None,
+        end_ts: Optional[int] = None,
     ) -> list[dict]:
         """Fetch price history for a market. period_interval: 1, 60, or 1440 min."""
         if not series_ticker or not ticker:
@@ -213,24 +326,40 @@ class FeedService:
             self._session = aiohttp.ClientSession()
         try:
             now = int(time.time())
-            start_ts = now - (hours * 3600)
+            resolved_end_ts = end_ts if end_ts is not None else now
+            resolved_start_ts = start_ts if start_ts is not None else (resolved_end_ts - (hours * 3600))
+
+            if resolved_start_ts >= resolved_end_ts:
+                return []
+
             path = f"/trade-api/v2/series/{series_ticker}/markets/{ticker}/candlesticks"
             params = {
-                "start_ts": start_ts,
-                "end_ts": now,
+                "start_ts": int(resolved_start_ts),
+                "end_ts": int(resolved_end_ts),
                 "period_interval": period_interval,
+                "include_latest_before_start": "true",
             }
             data = await self._kalshi_get(
                 path, f"{KALSHI_BASE_URL}/series/{series_ticker}/markets/{ticker}/candlesticks", params
             )
             candlesticks = data.get("candlesticks", [])
-            points = []
+            points: list[dict] = []
             for c in candlesticks:
-                ts = c.get("end_period_ts", 0)
-                price = c.get("price", {}).get("close", 0) or c.get("yes_bid", {}).get("close", 0)
-                if ts and price:
-                    points.append({"ts": ts, "price": price})
-            return points
+                ts = c.get("end_period_ts")
+                price_cents = self._extract_candle_close_cents(c)
+                if ts is None or price_cents is None:
+                    continue
+                try:
+                    ts_int = int(ts)
+                except (TypeError, ValueError):
+                    continue
+                points.append({
+                    "ts": ts_int,
+                    "price": round(max(0.0, min(100.0, price_cents)), 2),
+                })
+
+            deduped = {p["ts"]: p["price"] for p in points}
+            return [{"ts": ts, "price": price} for ts, price in sorted(deduped.items())]
         finally:
             if own_session:
                 await self._session.close()
@@ -377,19 +506,48 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
         ticker = market.get("ticker", "")
         formatted = await self._format_market_display(market, event, keywords)
         image = await self._resolve_market_image(event_ticker, ticker, event)
+
+        market_details: dict = {}
+        market_start_ts = self._get_market_start_ts(market)
+        if market_start_ts is None:
+            try:
+                market_details = await self._get_market(ticker)
+                market_start_ts = self._get_market_start_ts(market_details)
+            except Exception as e:
+                print(f"[market] Failed to get details for {ticker}: {e}")
+
+        market_source = market_details or market
+        resolved_series_ticker = (
+            series_ticker
+            or market_source.get("series_ticker", "")
+            or event.get("series_ticker", "")
+        )
+        yes_price = self._to_cents(market_source.get("yes_bid"), market_source.get("yes_bid_dollars"))
+        no_price = self._to_cents(market_source.get("no_bid"), market_source.get("no_bid_dollars"))
         price_history = []
         try:
-            price_history = await self.get_candlesticks(series_ticker, ticker, 60, 24)
+            if resolved_series_ticker and market_start_ts is not None:
+                price_history = await self.get_candlesticks(
+                    resolved_series_ticker,
+                    ticker,
+                    period_interval=1440,
+                    start_ts=market_start_ts,
+                )
+            elif resolved_series_ticker:
+                price_history = await self.get_candlesticks(resolved_series_ticker, ticker, 1440, 24 * 365)
         except Exception as e:
             print(f"[candlestick] Failed for {ticker}: {e}")
         return {
             "ticker": ticker,
             "event_ticker": event_ticker,
-            "series_ticker": series_ticker,
+            "series_ticker": resolved_series_ticker,
             "question": formatted.get("question", ""),
             "outcome": formatted.get("outcome", ""),
-            "yes_price": market.get("yes_bid", 0),
-            "no_price": market.get("no_bid", 0),
+            "created_time": market_source.get("created_time"),
+            "open_time": market_source.get("open_time"),
+            "market_start_ts": market_start_ts,
+            "yes_price": round(yes_price or 0, 2),
+            "no_price": round(no_price or 0, 2),
             "volume": market.get("volume", 0),
             "image_url": image,
             "price_history": price_history,

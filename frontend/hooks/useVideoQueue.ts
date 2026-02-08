@@ -8,11 +8,56 @@ const STORAGE_KEY = 'video_queue'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const BATCH_SIZE = 10
 
+type StoredQueueItem = {
+  video_id: string
+  status: QueueItem['status']
+  error?: string
+}
+
+function normalizeStoredQueueItem(value: unknown): QueueItem | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  const video_id = typeof raw.video_id === 'string' ? raw.video_id.trim() : ''
+  if (!video_id) return null
+
+  const statusValue = typeof raw.status === 'string' ? raw.status : 'pending'
+  const normalizedStatus: QueueItem['status'] =
+    statusValue === 'failed'
+      ? 'failed'
+      : statusValue === 'processing' || statusValue === 'matched'
+        ? 'pending'
+        : 'pending'
+
+  const error = typeof raw.error === 'string' && raw.error.trim() ? raw.error : undefined
+  return {
+    video_id,
+    status: normalizedStatus,
+    error: normalizedStatus === 'failed' ? error : undefined,
+    result: undefined,
+  }
+}
+
+function toStoredQueue(queue: QueueItem[]): StoredQueueItem[] {
+  return queue.map((item) => {
+    const normalizedStatus: QueueItem['status'] = item.status === 'failed' ? 'failed' : 'pending'
+    return {
+      video_id: item.video_id,
+      status: normalizedStatus,
+      error: normalizedStatus === 'failed' ? item.error : undefined,
+    }
+  })
+}
+
 function loadFromStorage(): QueueItem[] {
   if (typeof window === 'undefined') return []
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
+    if (!stored) return []
+    const parsed: unknown = JSON.parse(stored)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((entry) => normalizeStoredQueueItem(entry))
+      .filter((entry): entry is QueueItem => entry !== null)
   } catch {
     return []
   }
@@ -20,7 +65,7 @@ function loadFromStorage(): QueueItem[] {
 
 function saveToStorage(queue: QueueItem[]) {
   if (typeof window === 'undefined') return
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(queue))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(toStoredQueue(queue)))
 }
 
 export function useVideoQueue() {
@@ -134,13 +179,30 @@ export function useVideoQueue() {
     failed: queue.filter(q => q.status === 'failed').length,
   }), [queue])
 
+  const feedError = useMemo(() => {
+    const failed = queue.find(q => q.status === 'failed' && q.error)
+    return failed?.error ?? null
+  }, [queue])
+
+  const retryFailed = useCallback(() => {
+    setQueue(prev =>
+      prev.map(item =>
+        item.status === 'failed'
+          ? { ...item, status: 'pending' as const, error: undefined }
+          : item
+      )
+    )
+  }, [])
+
   return {
     queue,
     feedItems,
     stats,
+    feedError,
     isProcessing,
     addVideos,
     clearQueue,
     processQueue,
+    retryFailed,
   }
 }

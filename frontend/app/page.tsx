@@ -81,10 +81,11 @@ function SpeechBubble({ text }: { text: string }) {
 }
 
 export default function Home() {
-  const { feedItems, stats, isProcessing, processQueue } = useVideoQueue()
+  const { feedItems, stats, feedError, isProcessing, processQueue, retryFailed, clearQueue } = useVideoQueue()
   const [currentMarkets, setCurrentMarkets] = useState<KalshiMarket[]>([])
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [imgError, setImgError] = useState(false)
+  const [graphReadyByTicker, setGraphReadyByTicker] = useState<Record<string, boolean>>({})
   const [stage, setStage] = useState(0) // 0-4 = tutorial, 5 = feed
   const [waitingForFeed, setWaitingForFeed] = useState(false)
   const feedRef = useRef<FeedRef>(null)
@@ -136,11 +137,17 @@ export default function Home() {
     setImgError(false)
   }, [])
 
+  const handleChartReady = useCallback((ticker: string) => {
+    setGraphReadyByTicker((prev) => (prev[ticker] ? prev : { ...prev, [ticker]: true }))
+  }, [])
+
   const currentAnimation = waitingForFeed && stage === 4 ? 'idle' : (TIPS[stage]?.animation ?? 'idle')
   const currentTipText = waitingForFeed && stage === 4 ? 'Hang tight...' : (TIPS[stage]?.text ?? '')
 
   // rotationY per stage: point stages face toward phone, others centered
   const currentRotationY = currentAnimation === 'point' ? 0.4 : 0.3
+  const isActiveMarketGraphReady = expandedMarket ? !!graphReadyByTicker[expandedMarket.ticker] : false
+  const isFeedScrollLocked = !expandedMarket || (expandedMarket.series_ticker ? !isActiveMarketGraphReady : false)
 
   // --- FEED VIEW (stage 5) ---
   if (stage === 5) {
@@ -174,6 +181,13 @@ export default function Home() {
             <Iphone className="w-[380px] max-h-screen" frameColor="#1a1a1a">
               <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} />
             </Iphone>
+            {isFeedScrollLocked && (
+              <div className="absolute inset-0 z-30 flex items-start justify-center pointer-events-auto">
+                <div className="mt-5 rounded-full bg-black/55 border border-white/15 px-3 py-1 text-xs text-white/80">
+                  Syncing Kalshi graph...
+                </div>
+              </div>
+            )}
           </div>
 
           {currentMarkets.length > 0 && expandedMarket && (
@@ -284,23 +298,30 @@ export default function Home() {
                     <span className="text-xs text-white/40 uppercase tracking-wider">Yes Price</span>
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm text-white/70 font-medium">{expandedMarket.yes_price}¢</span>
-                      {expandedMarket.price_history && expandedMarket.price_history.length > 1 && (() => {
+                      {isActiveMarketGraphReady && expandedMarket.price_history && expandedMarket.price_history.length > 1 && (() => {
                         const prices = expandedMarket.price_history!.map(p => p.price)
                         const trending = prices[prices.length - 1] >= prices[0]
                         const diff = prices[prices.length - 1] - prices[0]
                         return (
                           <span className={`text-xs font-medium ${trending ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {trending ? '+' : ''}{diff.toFixed(0)}¢ 24h
+                            {trending ? '+' : ''}{diff.toFixed(0)}¢ since open
                           </span>
                         )
                       })()}
                     </div>
                   </div>
+                  {!isActiveMarketGraphReady && (
+                    <div className="mb-2 text-xs text-white/60">Loading full market history...</div>
+                  )}
                   <PriceChart
                     key={expandedMarket.ticker}
                     ticker={expandedMarket.ticker}
                     seriesTicker={expandedMarket.series_ticker}
                     priceHistory={expandedMarket.price_history}
+                    createdTime={expandedMarket.created_time}
+                    openTime={expandedMarket.open_time}
+                    marketStartTs={expandedMarket.market_start_ts}
+                    onReady={handleChartReady}
                   />
                 </div>
               )}
@@ -362,8 +383,35 @@ export default function Home() {
                 {feedItems.length > 0 ? (
                   <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} />
                 ) : (
-                  <div className="flex items-center justify-center h-full bg-black">
-                    <div className="text-white/30 text-sm">Loading shorts...</div>
+                  <div className="flex flex-col items-center justify-center h-full bg-black gap-3 p-4">
+                    <div className="text-white/30 text-sm">
+                      {isProcessing ? 'Loading shorts...' : feedError ? 'Error loading feed' : 'No shorts loaded'}
+                    </div>
+                    {feedError && (
+                      <div className="text-red-400/80 text-xs text-center max-w-[260px]">
+                        {feedError.includes('fetch') || feedError.includes('Failed to fetch')
+                          ? 'Backend was unreachable.'
+                          : feedError}
+                      </div>
+                    )}
+                    {!isProcessing && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={retryFailed}
+                          className="px-4 py-2 rounded-lg text-sm font-medium bg-white/15 text-white hover:bg-white/25 transition-colors"
+                        >
+                          Retry
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearQueue}
+                          className="px-4 py-2 rounded-lg text-sm font-medium bg-white/10 text-white/60 hover:bg-white/15 hover:text-white/80 transition-colors"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </Iphone>
@@ -440,3 +488,4 @@ export default function Home() {
     </BgWrapper>
   )
 }
+

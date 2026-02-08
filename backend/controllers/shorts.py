@@ -27,15 +27,28 @@ class Shorts(APIController):
 
     @get("/candlesticks")
     async def get_candlesticks(
-        self, ticker: str = "", series_ticker: str = "", period: int = 1, hours: int = 2
+        self,
+        ticker: str = "",
+        series_ticker: str = "",
+        period: int = 1,
+        hours: int = 2,
+        start_ts: int = 0,
+        end_ts: int = 0,
     ):
         if not ticker or not series_ticker:
             return json({"error": "ticker and series_ticker required"}, status=400)
         if period not in (1, 60, 1440):
             return json({"error": "period must be 1, 60, or 1440"}, status=400)
+        if start_ts and end_ts and start_ts >= end_ts:
+            return json({"error": "start_ts must be less than end_ts"}, status=400)
         try:
             candlesticks = await self.feed_service.get_candlesticks(
-                series_ticker, ticker, period_interval=period, hours=hours
+                series_ticker,
+                ticker,
+                period_interval=period,
+                hours=hours,
+                start_ts=start_ts or None,
+                end_ts=end_ts or None,
             )
             return json({"candlesticks": candlesticks})
         except Exception as e:
