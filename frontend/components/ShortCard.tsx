@@ -105,13 +105,17 @@ function ShortCard({ item, isActive, shouldRender = true }: ShortCardProps) {
     const video = videoRef.current
     if (!video) return
     if (isActive) {
-      video.play().catch(() => {
-        // Autoplay blocked (unmuted) — mute and retry
-        video.muted = true
-        video.play().catch(() => {})
-      })
+      if (video.paused) {
+        video.play().catch(() => {
+          // Autoplay blocked (unmuted) — mute and retry
+          video.muted = true
+          video.play().catch(() => {})
+        })
+      }
     } else {
-      video.pause()
+      if (!video.paused) {
+        video.pause()
+      }
     }
   }, [isActive, isMp4, shouldRender])
 
@@ -177,18 +181,10 @@ function ShortCard({ item, isActive, shouldRender = true }: ShortCardProps) {
     )
   }, [iframeId])
 
-  if (!shouldRender) {
-    return (
-      <div className="short-card">
-        <div className="video-container" style={{ width: '100%', height: '100%', background: '#000' }} />
-      </div>
-    )
-  }
-
   if (isMp4 && item.video?.type === 'mp4') {
     return (
       <div className="short-card">
-        <div className="video-container">
+        <div className="video-container" style={!shouldRender ? { visibility: 'hidden' } : undefined}>
           <video
             ref={videoRef}
             className="video-iframe"
@@ -201,41 +197,51 @@ function ShortCard({ item, isActive, shouldRender = true }: ShortCardProps) {
             style={{ pointerEvents: 'auto', objectFit: 'cover' }}
           />
         </div>
-        <button
-          onClick={toggleMute}
-          style={{
-            position: 'absolute',
-            bottom: 80,
-            right: 12,
-            zIndex: 15,
-            width: 36,
-            height: 36,
-            borderRadius: '50%',
-            border: 'none',
-            background: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            pointerEvents: 'auto',
-            padding: 0,
-          }}
-          aria-label={isMuted ? 'Unmute' : 'Mute'}
-        >
-          {isMuted ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-              <line x1="23" y1="9" x2="17" y2="15" />
-              <line x1="17" y1="9" x2="23" y2="15" />
-            </svg>
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-            </svg>
-          )}
-        </button>
+        {shouldRender && (
+          <button
+            onClick={toggleMute}
+            style={{
+              position: 'absolute',
+              bottom: 80,
+              right: 12,
+              zIndex: 15,
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              border: 'none',
+              background: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              pointerEvents: 'auto',
+              padding: 0,
+            }}
+            aria-label={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  if (!shouldRender) {
+    return (
+      <div className="short-card">
+        <div className="video-container" style={{ width: '100%', height: '100%', background: '#000' }} />
       </div>
     )
   }
