@@ -1,4 +1,5 @@
-# Kalship
+# <img src="./assets/kalship-logo.png" alt="Logo" height="32"> Kalship
+
 Create your own agentic prediction feed on top of Kalshi
 
 Agentic market matching that links YouTube Shorts to relevant Kalshi markets, with live YES/NO context and optional AI video generation.
