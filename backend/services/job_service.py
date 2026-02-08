@@ -3,8 +3,9 @@ import json
 import logging
 import traceback
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 from google.cloud import storage
@@ -12,19 +13,60 @@ from google.cloud import storage
 from models.job import JobStatus, VideoJobRequest
 from services.vertex_service import VertexService
 from utils.env import settings
-from utils.gemini_prompt_builder import create_first_image_prompt
 from utils.veo_prompt_builder import create_video_prompt
 
 logger = logging.getLogger("job_service")
+MAX_REFERENCE_IMAGES = 3
+IMAGE_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/png,image/jpeg,image/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _looks_like_image(data: bytes) -> bool:
+    if not data:
+        return False
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if data.startswith(b"\xff\xd8\xff"):
+        return True
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return True
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return True
+    if len(data) > 12 and data[4:12] == b"ftypavif":
+        return True
+    return False
 
 
 async def fetch_image_from_url(url: str) -> Optional[bytes]:
     """Fetch image bytes from URL."""
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    request_headers = {
+        **IMAGE_REQUEST_HEADERS,
+        "Referer": f"{parsed.scheme}://{parsed.netloc}/",
+    }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status == 200:
-                    return await response.read()
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(headers=request_headers, connector=connector) as session:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=15),
+                allow_redirects=True,
+            ) as response:
+                if response.status != 200:
+                    return None
+                payload = await response.read()
+                content_type = (response.headers.get("Content-Type") or "").lower()
+                if content_type.startswith("image/") or _looks_like_image(payload):
+                    return payload
     except Exception as e:
         print(f"Failed to fetch image from {url}: {e}", flush=True)
     return None
@@ -209,44 +251,39 @@ class JobService:
             original_bet_link = job_data["original_bet_link"]
             duration = int(job_data.get("duration_seconds", 8))
             source_image_url = job_data.get("source_image_url")
-            reference_image_urls = job_data.get("reference_image_urls", [])
-
-            # Fetch source image if URL provided
+            raw_reference_urls = job_data.get("reference_image_urls") or []
+            if isinstance(raw_reference_urls, str):
+                raw_reference_urls = [
+                    u.strip()
+                    for u in raw_reference_urls.replace("\r", "\n").split("\n")
+                    if u.strip()
+                ]
+            reference_image_urls = [u for u in raw_reference_urls if u][:MAX_REFERENCE_IMAGES]
+            reference_images: list[bytes] = []
+            if reference_image_urls:
+                print(f"[{jid}] Fetching {len(reference_image_urls)} reference image(s)...", flush=True)
+                results = await asyncio.gather(*[fetch_image_from_url(url) for url in reference_image_urls])
+                reference_images = [img for img in results if img is not None]
+                print(
+                    f"[{jid}] Loaded {len(reference_images)}/{len(reference_image_urls)} reference image(s)",
+                    flush=True,
+                )
             source_image = None
             if source_image_url:
                 source_image = await fetch_image_from_url(source_image_url)
                 if source_image:
                     print(f"[{jid}] Using source image ({len(source_image)} bytes)", flush=True)
-
-            # Fetch reference images in parallel
-            reference_images = []
-            if reference_image_urls:
-                print(f"[{jid}] Reference URLs received: {reference_image_urls}", flush=True)
-                print(f"[{jid}] Fetching {len(reference_image_urls)} reference image(s)...", flush=True)
-                fetch_tasks = [fetch_image_from_url(url) for url in reference_image_urls]
-                results = await asyncio.gather(*fetch_tasks)
-                reference_images = [img for img in results if img is not None]
-                print(f"[{jid}] Successfully loaded {len(reference_images)}/{len(reference_image_urls)} reference image(s)", flush=True)
-                if len(reference_images) < len(reference_image_urls):
-                    print(f"[{jid}] WARNING: Some reference images failed to fetch!", flush=True)
-            else:
-                print(f"[{jid}] No reference image URLs provided", flush=True)
-
-            # Generate first frame (from source image + reference images if available)
-            first_prompt = create_first_image_prompt(
-                title=title,
-                outcome=outcome,
-                original_bet_link=original_bet_link,
-            )
-            first_image = await self.vertex_service.generate_image_from_prompt(
-                prompt=first_prompt,
-                image=source_image,
-                reference_images=reference_images if reference_images else None,
-            )
+                else:
+                    print(f"[{jid}] source_image_url could not be fetched; continuing without source image", flush=True)
+            if not source_image and not reference_images:
+                raise ValueError("At least one valid source image or reference image is required")
+            if source_image and reference_images:
+                print(f"[{jid}] Both source and reference images supplied; Veo request will use reference-image mode", flush=True)
 
             image_uri = ""
-            if self.bucket:
-                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, first_image)
+            preview_image = source_image or (reference_images[0] if reference_images else None)
+            if self.bucket and preview_image:
+                image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, preview_image)
 
             veo_prompt = create_video_prompt(
                 title=title,
@@ -255,7 +292,7 @@ class JobService:
             )
             operation = await self.vertex_service.generate_video_content(
                 prompt=veo_prompt,
-                image_data=first_image,
+                image_data=None if reference_images else source_image,
                 duration_seconds=duration,
                 reference_images=reference_images if reference_images else None,
             )

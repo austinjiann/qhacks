@@ -5,14 +5,12 @@ from google.genai.types import (
     GenerateVideosConfig,
     GenerateVideosOperation,
     Image,
-    GenerateContentConfig,
-    ImageConfig,
-    Part,
 )
 from models.job import JobStatus
 from utils.env import settings
 
 logger = logging.getLogger("vertex_service")
+MAX_REFERENCE_IMAGES = 3
 
 
 def _infer_mime_type(image_bytes: bytes) -> str:
@@ -40,127 +38,69 @@ class VertexService:
     async def generate_video_content(
         self,
         prompt: str,
-        image_data: bytes,
+        image_data: bytes | None,
         duration_seconds: int = 8,
         reference_images: list[bytes] | None = None,
     ) -> GenerateVideosOperation:
         output_gcs_uri = f"gs://{self.bucket_name}/videos/"
+        ref_payload = []
+        for ref_img in (reference_images or [])[:MAX_REFERENCE_IMAGES]:
+            ref_payload.append(
+                {
+                    "image": Image(
+                        image_bytes=ref_img,
+                        mime_type=_infer_mime_type(ref_img),
+                    ),
+                    "reference_type": "ASSET",
+                }
+            )
+        use_reference_mode = bool(ref_payload)
+        if use_reference_mode and image_data is not None:
+            logger.warning("Both source image and reference images were provided; using reference-image mode only.")
+        if not use_reference_mode and image_data is None:
+            raise ValueError("Either image_data or reference_images must be provided")
+        config_kwargs = {
+            "aspect_ratio": "9:16",
+            "duration_seconds": duration_seconds,
+            "output_gcs_uri": output_gcs_uri,
+            "negative_prompt": (
+                "text, captions, subtitles, annotations, logos, low quality, static shot, slideshow, "
+                "ugly, bad anatomy, extra limbs, deformed faces, identity drift, face morphing, "
+                "weird physics, backwards motion, reverse playback, teleporting, time jump glitches, "
+                "body interpenetration, merged players, clipping through objects, impossible collisions, "
+                "random extra characters, sudden outfit changes, disappearing equipment, "
+                "helmetless football players, broken sports gear continuity"
+            ),
+            "resolution": "4k",
+        }
+        if ref_payload:
+            config_kwargs["reference_images"] = ref_payload
+        try:
+            config = GenerateVideosConfig(**config_kwargs)
+        except Exception as exc:
+            logger.warning(f"GenerateVideosConfig does not accept resolution on this SDK build: {exc}")
+            config_kwargs.pop("resolution", None)
+            config = GenerateVideosConfig(**config_kwargs)
 
-        # Veo only supports one conditioning image. Gemini composes references into this start frame first.
-        logger.info(f"Calling Veo with 1 input image ({len(image_data)} bytes)")
-        if reference_images:
-            logger.info(f"Reference image count used to build start frame: {len(reference_images)}")
+        if use_reference_mode:
+            operation = self.client.models.generate_videos(
+                model="veo-3.1-generate-preview",
+                prompt=prompt,
+                config=config,
+            )
+            return operation
+
         image_mime = _infer_mime_type(image_data)
-
         operation = self.client.models.generate_videos(
-            model="veo-3.1-fast-generate-001",
+            model="veo-3.1-generate-preview",
             prompt=prompt,
             image=Image(
                 image_bytes=image_data,
                 mime_type=image_mime,
             ),
-            config=GenerateVideosConfig(
-                aspect_ratio="9:16",
-                duration_seconds=duration_seconds,
-                output_gcs_uri=output_gcs_uri,
-                negative_prompt=(
-                    "text, captions, subtitles, annotations, logos, low quality, static shot, slideshow, "
-                    "ugly, bad anatomy, extra limbs, deformed faces, identity drift, face morphing, "
-                    "weird physics, backwards motion, reverse playback"
-                ),
-            ),
+            config=config,
         )
         return operation
-    
-    async def generate_image_from_prompt(
-        self,
-        prompt: str,
-        image: bytes | None = None,
-        reference_images: list[bytes] | None = None,
-    ) -> bytes:
-        if not prompt:
-            raise ValueError("prompt is required")
-
-        contents = []
-
-        # Add source image first if provided
-        if image:
-            logger.info(f"Adding source image ({len(image)} bytes) to Gemini request")
-            contents.append(Part.from_bytes(data=image, mime_type=_infer_mime_type(image)))
-
-        # Add reference images for additional context
-        if reference_images:
-            logger.info(f"Adding {len(reference_images)} reference image(s) to Gemini request")
-            for i, ref_img in enumerate(reference_images):
-                logger.info(f"  Reference image {i+1}: {len(ref_img)} bytes")
-                contents.append(Part.from_bytes(data=ref_img, mime_type=_infer_mime_type(ref_img)))
-        else:
-            logger.info("No reference images provided to Gemini")
-
-        # Build strict image-conditioning instructions based on supplied images.
-        if image and reference_images:
-            enhanced_prompt = f"""{prompt}
-
-IMAGE USAGE INSTRUCTIONS:
-- IMAGE 1 is the ACTION AND COMPOSITION anchor.
-- IMAGES 2+ are IDENTITY anchors.
-
-HARD CONSTRAINTS:
-- Faces from IMAGES 2+ must match exactly (facial structure, skin tone, hairline, age range).
-- Do not merge identities, swap faces, or invent new primary subjects.
-- Keep uniform/team styling from IMAGE 1 when visible.
-- Preserve high-energy motion pose from IMAGE 1.
-- Scene must clearly depict the selected outcome as true."""
-        elif image:
-            enhanced_prompt = f"""{prompt}
-
-Use the provided action image as reference for:
-- Athletic pose and composition
-- Uniform colors and team branding
-- Energy and movement style
-- Stadium atmosphere
-
-Create a cinematic, action-heavy frame that can cleanly animate into an intense short clip."""
-        elif reference_images:
-            enhanced_prompt = f"""{prompt}
-
-The provided images are IDENTITY references.
-- The main subjects must match these faces exactly.
-- Build a dynamic, action-first scene around these people.
-- No face morphing, no identity swaps."""
-        else:
-            enhanced_prompt = prompt
-
-        contents.append(enhanced_prompt)
-
-        response = self.client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=contents,
-            config=GenerateContentConfig(
-                response_modalities=["IMAGE"],
-                image_config=ImageConfig(
-                    aspect_ratio="9:16",
-                ),
-                candidate_count=1,
-            ),
-        )
-
-        if not response.candidates or not response.candidates[0].content.parts:
-            raise Exception(str(response))
-
-        return response.candidates[0].content.parts[0].inline_data.data
-
-    async def generate_image_content(
-        self,
-        title: str,
-        outcome: str,
-        additional: str | None = None,
-        image: bytes | None = None
-    ) -> bytes:
-        prompt = f"{title}\n{outcome}"
-        if additional:
-            prompt += f"\n{additional}"
-        return await self.generate_image_from_prompt(prompt=prompt, image=image)
     
     async def get_video_status(self, operation: GenerateVideosOperation) -> JobStatus:
         operation = self.client.operations.get(operation)

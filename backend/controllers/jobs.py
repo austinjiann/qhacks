@@ -1,5 +1,4 @@
 # Job controller for video generation pipeline
-import json as json_lib
 import logging
 from datetime import datetime
 
@@ -17,18 +16,27 @@ class Jobs(APIController):
     def __init__(self, job_service: JobService):
         self.job_service = job_service
 
-    def _coerce_payload(self, payload: dict) -> dict:
-        # Handle reference_image_urls - can be list or comma-separated string
-        ref_urls = payload.get("reference_image_urls") or payload.get("referenceImageUrls") or []
-        if isinstance(ref_urls, str):
-            rows = ref_urls.replace("\r", "\n").split("\n")
-            ref_urls = [
-                url.strip()
+    @staticmethod
+    def _coerce_list(value) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            rows = value.replace("\r", "\n").split("\n")
+            return [
+                item.strip()
                 for row in rows
-                for url in row.split(",")
-                if url.strip()
+                for item in row.split(",")
+                if item.strip()
             ]
+        if isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
 
+    def _coerce_payload(self, payload: dict) -> dict:
+        ref_urls = self._coerce_list(
+            payload.get("reference_image_urls")
+            or payload.get("referenceImageUrls")
+        )
         return {
             "title": payload.get("title"),
             # New schema uses "outcome"; keep "caption" as backward-compatible fallback.
@@ -77,17 +85,19 @@ class Jobs(APIController):
         title = (payload.get("title") or "").strip()
         outcome = (payload.get("outcome") or "").strip()
         original_bet_link = (payload.get("original_bet_link") or "").strip()
+        source_image_url = (payload.get("source_image_url") or "").strip()
+        reference_image_urls = payload.get("reference_image_urls") or []
 
         log_api("/create", f"Title: {title[:50]}...")
         log_api("/create", f"Outcome: {outcome[:50]}...")
         log_api("/create", f"Bet link: {original_bet_link}")
 
-        if not title or not outcome or not original_bet_link:
+        if not title or not outcome or not original_bet_link or (not source_image_url and not reference_image_urls):
             log_api("/create", "ERROR: Missing required fields")
             return json(
                 {
                     "error": (
-                        "title, outcome, and original_bet_link are required"
+                        "title, outcome, and original_bet_link are required; provide source_image_url or reference_image_urls"
                     )
                 },
                 status=400,
@@ -98,16 +108,13 @@ class Jobs(APIController):
         except Exception:
             duration_seconds = 6
 
-        source_image_url = (payload.get("source_image_url") or "").strip() or None
-        reference_image_urls = [u for u in payload.get("reference_image_urls", []) if u]
-
         job_request = VideoJobRequest(
             title=title,
             outcome=outcome,
             original_bet_link=original_bet_link,
             duration_seconds=max(5, min(duration_seconds, 8)),
-            source_image_url=source_image_url,
-            reference_image_urls=reference_image_urls,
+            source_image_url=source_image_url or None,
+            reference_image_urls=reference_image_urls[:3],
         )
 
         log_api("/create", f"Creating video job (duration={job_request.duration_seconds}s)...")
