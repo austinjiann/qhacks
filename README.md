@@ -1,4 +1,4 @@
-# Kalship <img src="./assets/kalship-logo.png" alt="Logo" height="32">
+# Kalship <img src="/frontend/public/kalship-text.png" alt="Logo" height="32">
 
 Create your own agentic prediction feed on top of Kalshi
 

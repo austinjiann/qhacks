@@ -77,7 +77,7 @@ class VertexService:
                 "random extra characters, sudden outfit changes, disappearing equipment, "
                 "helmetless football players, broken sports gear continuity"
             ),
-            "resolution": "4k",
+            "resolution": "1080p",
         }
         try:
             config = GenerateVideosConfig(**config_kwargs)
