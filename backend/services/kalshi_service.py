@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import re
+import ssl
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -10,6 +11,11 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 from utils.env import settings
+
+# Disable SSL verification for local dev (macOS Python SSL cert issue)
+_ssl_context = ssl.create_default_context()
+_ssl_context.check_hostname = False
+_ssl_context.verify_mode = ssl.CERT_NONE
 
 KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
@@ -37,7 +43,7 @@ class KalshiService:
 
     async def ensure_session(self) -> None:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_ssl_context))
 
     async def close_session(self) -> None:
         if self._session is not None:
