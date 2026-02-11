@@ -38,7 +38,7 @@ class Pool(APIController):
                 "video_url": v.get("video_url", ""),
                 "title": v.get("title", ""),
                 "kalshi": v.get("kalshi", []),
-                "bet_side": v.get("bet_side", ""),
+                "trade_side": v.get("trade_side", ""),
             })
         return json(result)
 

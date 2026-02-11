@@ -36,13 +36,13 @@ python main.py       # Runs uvicorn on port 8000
 
 ### Backend Services (Dependency Injected via rodi)
 - **FeedService**: Core matching logic - YouTube metadata → OpenAI keyword extraction → Kalshi API market matching
-- **JobService**: Video generation pipeline using Vertex AI (Veo) - creates promotional videos from bet data
+- **JobService**: Video generation pipeline using Vertex AI (Veo) - creates promotional videos from trade data
 - **VertexService**: Google Vertex AI wrapper for image/video generation
 
 ### Frontend Structure
-- `app/page.tsx`: Main page with iPhone mockup, bet modal, background
+- `app/page.tsx`: Main page with iPhone mockup, trade modal, background
 - `components/Feed.tsx`: Scrollable feed container with snap scrolling
-- `components/ShortCard.tsx`: Individual video card with embedded YouTube + bet overlay
+- `components/ShortCard.tsx`: Individual video card with embedded YouTube + trade overlay
 - `hooks/useVideoQueue.ts`: Queue management, API calls, localStorage persistence
 - `types/index.ts`: Shared TypeScript interfaces (KalshiMarket, FeedItem, etc.)
 

@@ -3,7 +3,7 @@ from utils.env import settings
 
 _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-SYSTEM_PROMPT = """You lightly clarify betting market titles for a video AI. Given a bet title, outcome, and link, return ONE short sentence that makes the outcome obvious.
+SYSTEM_PROMPT = """You lightly clarify trading market titles for a video AI. Given a trade title, outcome, and link, return ONE short sentence that makes the outcome obvious.
 
 Rules:
 1. Stay very close to the original title. Only add small clarifying details.
@@ -13,10 +13,10 @@ Rules:
 5. Just state what happened as a simple headline."""
 
 
-async def enhance_prompt(title: str, outcome: str, original_bet_link: str) -> str:
-    user_message = f"""Bet title: {title}
+async def enhance_prompt(title: str, outcome: str, original_trade_link: str) -> str:
+    user_message = f"""Trade title: {title}
 Selected outcome: {outcome}
-Bet link: {original_bet_link}
+Trade link: {original_trade_link}
 
 Write a vivid cinematic scene description for this outcome."""
 

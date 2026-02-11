@@ -46,7 +46,7 @@ def _scene_direction(title: str, outcome: str) -> str:
 def create_first_image_prompt(
     title: str,
     outcome: str,
-    original_bet_link: str,
+    original_trade_link: str,
 ) -> str:
     """
     Build the first-frame prompt for Gemini image generation.

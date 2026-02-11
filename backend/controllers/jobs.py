@@ -21,16 +21,16 @@ class Jobs(APIController):
             "title": payload.get("title"),
             # New schema uses "outcome"; keep "caption" as backward-compatible fallback.
             "outcome": payload.get("outcome") or payload.get("caption"),
-            "original_bet_link": (
-                payload.get("original_bet_link")
-                or payload.get("originalBetLink")
-                or payload.get("originla_bet_link")
-                or payload.get("bet_link")
-                or payload.get("bet")
+            "original_trade_link": (
+                payload.get("original_trade_link")
+                or payload.get("originalTradeLink")
+                or payload.get("originla_trade_link")
+                or payload.get("trade_link")
+                or payload.get("trade")
             ),
             "source_image_url": payload.get("source_image_url") or payload.get("sourceImageUrl"),
             "kalshi": payload.get("kalshi"),
-            "bet_side": payload.get("bet_side"),
+            "trade_side": payload.get("trade_side"),
         }
         
     @get("/health")
@@ -68,30 +68,31 @@ class Jobs(APIController):
         payload = self._coerce_payload(body)
         title = (payload.get("title") or "").strip()
         outcome = (payload.get("outcome") or "").strip()
-        original_bet_link = (payload.get("original_bet_link") or "").strip()
+        original_trade_link = (payload.get("original_trade_link") or "").strip()
         source_image_url = (payload.get("source_image_url") or "").strip()
 
         log_api("/create", f"Title: {title[:50]}...")
         log_api("/create", f"Outcome: {outcome[:50]}...")
-        log_api("/create", f"Bet link: {original_bet_link}")
+        log_api("/create", f"Trade link: {original_trade_link}")
 
-        if not title or not outcome or not original_bet_link:
+        if not title or not outcome or not original_trade_link:
             log_api("/create", "ERROR: Missing required fields")
             return json(
-                {"error": "title, outcome, and original_bet_link are required"},
+                {"error": "title, outcome, and original_trade_link are required"},
+
                 status=400,
             )
 
         kalshi = payload.get("kalshi")
-        bet_side = payload.get("bet_side")
+        trade_side = payload.get("trade_side")
 
         job_request = VideoJobRequest(
             title=title,
             outcome=outcome,
-            original_bet_link=original_bet_link,
+            original_trade_link=original_trade_link,
             source_image_url=source_image_url or None,
             kalshi=kalshi,
-            bet_side=bet_side,
+            trade_side=trade_side,
         )
 
         log_api("/create", "Creating video job...")
@@ -113,7 +114,7 @@ class Jobs(APIController):
             "status": status.status,
             "video_url": status.video_url,
             "error": status.error,
-            "original_bet_link": status.original_bet_link,
+            "original_trade_link": status.original_trade_link,
             "image_url": status.image_url,
         }
         logger.debug(f"Job {job_id} status response: status={status.status}")

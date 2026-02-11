@@ -237,7 +237,7 @@ class JobService:
                 "job_start_time": datetime.now().isoformat(),
                 "title": request.title,
                 "outcome": request.outcome,
-                "original_bet_link": request.original_bet_link,
+                "original_trade_link": request.original_trade_link,
                 "source_image_url": request.source_image_url,
             },
         )
@@ -245,10 +245,10 @@ class JobService:
         job_data = {
             "title": request.title,
             "outcome": request.outcome,
-            "original_bet_link": request.original_bet_link,
+            "original_trade_link": request.original_trade_link,
             "source_image_url": request.source_image_url,
             "kalshi": request.kalshi,
-            "bet_side": request.bet_side,
+            "trade_side": request.trade_side,
         }
 
         if self.cloud_tasks:
@@ -270,7 +270,7 @@ class JobService:
             outcome = (job_data.get("outcome") or job_data.get("caption") or "").strip()
             if not outcome:
                 raise ValueError("outcome is required")
-            original_bet_link = job_data["original_bet_link"]
+            original_trade_link = job_data["original_trade_link"]
             source_image_url = job_data.get("source_image_url")
 
             # starting frame
@@ -287,7 +287,7 @@ class JobService:
                 image_prompt = create_first_image_prompt(
                     title=title,
                     outcome=outcome,
-                    original_bet_link=original_bet_link,
+                    original_trade_link=original_trade_link,
                 )
                 source_image = await self.vertex_service.generate_starting_frame(image_prompt)
                 if source_image:
@@ -304,7 +304,7 @@ class JobService:
             veo_prompt = create_video_prompt(
                 title=title,
                 outcome=outcome,
-                original_bet_link=original_bet_link,
+                original_trade_link=original_trade_link,
             )
             operation = await self.vertex_service.generate_video_content(
                 prompt=veo_prompt,
@@ -317,10 +317,10 @@ class JobService:
                 "job_start_time": existing_job.get("job_start_time") if existing_job else start_time,
                 "title": title,
                 "outcome": outcome,
-                "original_bet_link": original_bet_link,
+                "original_trade_link": original_trade_link,
                 "image_uri": image_uri,
                 "kalshi": job_data.get("kalshi"),
-                "bet_side": job_data.get("bet_side"),
+                "trade_side": job_data.get("trade_side"),
             })
             print(f"[{jid}] Video processing started", flush=True)
 
@@ -332,7 +332,7 @@ class JobService:
                 "job_start_time": existing_job.get("job_start_time") if existing_job else start_time,
                 "title": job_data.get("title"),
                 "outcome": job_data.get("outcome") or job_data.get("caption"),
-                "original_bet_link": job_data.get("original_bet_link"),
+                "original_trade_link": job_data.get("original_trade_link"),
             })
 
     async def get_job_status(self, job_id: str) -> Optional[JobStatus]:
@@ -351,21 +351,21 @@ class JobService:
             if job.get("job_end_time")
             else None
         )
-        original_bet_link = job.get("original_bet_link")
+        original_trade_link = job.get("original_trade_link")
         image_url = job.get("image_uri")
 
         if status in ("pending", "queued"):
-            return JobStatus(status="waiting", job_start_time=job_start_time, original_bet_link=original_bet_link, image_url=image_url)
+            return JobStatus(status="waiting", job_start_time=job_start_time, original_trade_link=original_trade_link, image_url=image_url)
 
         if status == "error":
-            return JobStatus(status="error", job_start_time=job_start_time, job_end_time=job_end_time, error=job.get("error"), original_bet_link=original_bet_link, image_url=image_url)
+            return JobStatus(status="error", job_start_time=job_start_time, job_end_time=job_end_time, error=job.get("error"), original_trade_link=original_trade_link, image_url=image_url)
 
         if status == "done":
             video_url = job.get("video_url")
             video_uri = job.get("video_uri")
             if video_uri:
                 video_url = self._generate_signed_url(video_uri)
-            return JobStatus(status="done", job_start_time=job_start_time, job_end_time=job_end_time, video_url=video_url, original_bet_link=original_bet_link, image_url=image_url)
+            return JobStatus(status="done", job_start_time=job_start_time, job_end_time=job_end_time, video_url=video_url, original_trade_link=original_trade_link, image_url=image_url)
 
         if status == "processing" and job.get("operation_name"):
             result = await self.vertex_service.get_video_status_by_name(job["operation_name"])
@@ -384,16 +384,16 @@ class JobService:
                         "video_url": video_url,
                         "title": job.get("title", ""),
                         "kalshi": job.get("kalshi", []),
-                        "bet_side": job.get("bet_side", ""),
+                        "trade_side": job.get("trade_side", ""),
                     })
                 except Exception as fs_exc:
                     logger.error(f"[{job_id[:8]}] Failed to store generated video in Firestore: {fs_exc}")
-                return JobStatus(status="done", job_start_time=job_start_time, job_end_time=job_end_time, video_url=video_url, original_bet_link=original_bet_link, image_url=image_url)
+                return JobStatus(status="done", job_start_time=job_start_time, job_end_time=job_end_time, video_url=video_url, original_trade_link=original_trade_link, image_url=image_url)
             if result.status == "error":
                 job["status"] = "error"
                 job["error"] = result.error
                 await self._save_job(job_id, job)
-                return JobStatus(status="error", error=result.error, original_bet_link=original_bet_link, image_url=image_url)
-            return JobStatus(status="waiting", job_start_time=job_start_time, original_bet_link=original_bet_link, image_url=image_url)
+                return JobStatus(status="error", error=result.error, original_trade_link=original_trade_link, image_url=image_url)
+            return JobStatus(status="waiting", job_start_time=job_start_time, original_trade_link=original_trade_link, image_url=image_url)
 
-        return JobStatus(status="waiting", job_start_time=job_start_time, original_bet_link=original_bet_link, image_url=image_url)
+        return JobStatus(status="waiting", job_start_time=job_start_time, original_trade_link=original_trade_link, image_url=image_url)

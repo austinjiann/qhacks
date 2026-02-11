@@ -70,7 +70,7 @@ class Shorts(APIController):
         no_price = data.get("no_price", 50)
         if not question:
             return json({"error": "question is required"}, status=400)
-        advice = await self.feed_service.get_bet_advice(
+        advice = await self.feed_service.get_trade_advice(
             question, side, amount, yes_price, no_price
         )
         return json({"advice": advice})

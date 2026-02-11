@@ -23,7 +23,7 @@ class Worker(APIController):
         if not data.get("outcome") and data.get("caption"):
             data["outcome"] = data.get("caption")
 
-        required = ("job_id", "title", "outcome", "original_bet_link")
+        required = ("job_id", "title", "outcome", "original_trade_link")
         missing = [key for key in required if not data.get(key)]
         if missing:
             return json(

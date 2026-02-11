@@ -16,7 +16,7 @@ class FeedService:
         self.kalshi_service = kalshi_service
 
     async def _extract_keywords(self, title: str, description: str) -> list[str]:
-        prompt = f"""Extract 3-5 keywords from this YouTube video that could match prediction market bets.
+        prompt = f"""Extract 3-5 keywords from this YouTube video that could match prediction market trades.
 Focus on: sports teams/players, political figures, companies, events, weather phenomena, cryptocurrency.
 Return ONLY comma-separated keywords, no explanation.
 
@@ -207,7 +207,7 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
         finally:
             await self.kalshi_service.close_session()
 
-    async def get_bet_advice(
+    async def get_trade_advice(
         self,
         question: str,
         side: str,
@@ -229,7 +229,7 @@ Trade side: {side}
 Amount: ${amount}
 Current odds: {side} at {price}¢
 
-Give your quick take. Be casual and fun."""
+Give your quick take on this trade. Be casual and fun."""
 
         try:
             response = await self.openai.chat.completions.create(
@@ -240,7 +240,7 @@ Give your quick take. Be casual and fun."""
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            return f"Hmm, I'm having trouble thinking right now... but trading ${amount} on {side}? Just make sure you're okay losing it!"
+            return f"Hmm, I'm having trouble thinking right now... but ${amount} on {side}? Just make sure you're okay losing it!"
 
     async def get_candlesticks(
         self,

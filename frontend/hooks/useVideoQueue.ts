@@ -119,7 +119,7 @@ export function useVideoQueue() {
             video: { type: 'mp4', url: video.video_url, title: video.title },
             kalshi: video.kalshi || [],
             isInjected: true,
-            injectedByBetSide: video.bet_side || undefined,
+            injectedByTradeSide: video.trade_side || undefined,
           }
 
           setFeedItems(prev => {
@@ -145,7 +145,7 @@ export function useVideoQueue() {
 
   const requestVideoGeneration = useCallback(async (
     market: KalshiMarket,
-    betSide: 'YES' | 'NO'
+    tradeSide: 'YES' | 'NO'
   ) => {
     try {
       const res = await fetch(`${API_URL}/jobs/create`, {
@@ -153,11 +153,11 @@ export function useVideoQueue() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: market.question,
-          outcome: `${betSide} - ${market.question}`,
-          original_bet_link: `https://kalshi.com/events/${market.event_ticker || market.ticker}`,
+          outcome: `${tradeSide} - ${market.question}`,
+          original_trade_link: `https://kalshi.com/events/${market.event_ticker || market.ticker}`,
           source_image_url: market.image_url || undefined,
           kalshi: [market],
-          bet_side: betSide,
+          trade_side: tradeSide,
         }),
       })
       if (!res.ok) throw new Error('Failed to queue video generation')

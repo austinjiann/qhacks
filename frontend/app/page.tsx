@@ -54,7 +54,7 @@ const TIPS = [
   { text: 'Welcome to Kalship!', animation: 'wave' as const },
   { text: "Today we're gonna scroll and trade on Kalshi.", animation: 'idle' as const },
   { text: 'Scroll through shorts right here.', animation: 'point' as const },
-  { text: 'Tap YES or NO to place a trade.', animation: 'point' as const },
+  { text: 'Tap YES or NO to place a trade!', animation: 'point' as const },
   { text: "Let's go!", animation: 'wave' as const },
 ]
 
@@ -160,10 +160,10 @@ export default function Home() {
   const historyFetchInFlight = useRef<Set<string>>(new Set())
   const historyByTickerRef = useRef(historyByTicker)
   const isFeed = stage === 5
-  const [betConfirmation, setBetConfirmation] = useState<{ side: 'YES' | 'NO'; message: string } | null>(null)
+  const [tradeConfirmation, setTradeConfirmation] = useState<{ side: 'YES' | 'NO'; message: string } | null>(null)
   const [currentIsInjected, setCurrentIsInjected] = useState(false)
-  const [showBetInput, setShowBetInput] = useState<{ side: 'YES' | 'NO' } | null>(null)
-  const [betAmount, setBetAmount] = useState('')
+  const [showTradeInput, setShowTradeInput] = useState<{ side: 'YES' | 'NO' } | null>(null)
+  const [tradeAmount, setTradeAmount] = useState('')
   const [adviceLoading, setAdviceLoading] = useState(false)
   const [adviceText, setAdviceText] = useState<string | null>(null)
 
@@ -417,21 +417,21 @@ export default function Home() {
     return 'loading'
   })()
 
-  const handleBet = useCallback((side: 'YES' | 'NO') => {
+  const handleTrade = useCallback((side: 'YES' | 'NO') => {
     if (!expandedMarket) return
     console.log(`Trade placed: ${side} on ${expandedMarket.ticker}`)
 
     if (currentIsInjected) {
-      setShowBetInput({ side })
-      setBetAmount('')
+      setShowTradeInput({ side })
+      setTradeAmount('')
       return
     }
 
     requestVideoGeneration(expandedMarket, side)
 
-    setBetConfirmation({
+    setTradeConfirmation({
       side,
-      message: `You traded ${side}! Your trade video is being generated!`,
+      message: `You traded ${side}! Your video is being generated!`,
     })
   }, [expandedMarket, requestVideoGeneration, currentIsInjected])
 
@@ -457,14 +457,14 @@ export default function Home() {
     [updateHistoryCache, setChartStatusByTicker]
   )
 
-  const dismissBetInput = useCallback(() => {
-    setShowBetInput(null)
-    setBetAmount('')
+  const dismissTradeInput = useCallback(() => {
+    setShowTradeInput(null)
+    setTradeAmount('')
   }, [])
 
-  const submitBetAdvice = useCallback(async () => {
-    if (!expandedMarket || !showBetInput || !betAmount) return
-    const amount = parseFloat(betAmount)
+  const submitTradeAdvice = useCallback(async () => {
+    if (!expandedMarket || !showTradeInput || !tradeAmount) return
+    const amount = parseFloat(tradeAmount)
     if (isNaN(amount) || amount <= 0) return
     setAdviceLoading(true)
     try {
@@ -473,7 +473,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: expandedMarket.question,
-          side: showBetInput.side,
+          side: showTradeInput.side,
           amount,
           yes_price: expandedMarket.yes_price ?? 50,
           no_price: expandedMarket.no_price ?? 50,
@@ -485,10 +485,10 @@ export default function Home() {
       setAdviceText('Hmm, I couldn\'t get advice right now. Try again!')
     } finally {
       setAdviceLoading(false)
-      setShowBetInput(null)
-      setBetAmount('')
+      setShowTradeInput(null)
+      setTradeAmount('')
     }
-  }, [expandedMarket, showBetInput, betAmount])
+  }, [expandedMarket, showTradeInput, tradeAmount])
 
   const dismissAdvice = useCallback(() => {
     setAdviceText(null)
@@ -496,29 +496,29 @@ export default function Home() {
 
   // Escape key dismisses overlays
   useEffect(() => {
-    if (!showBetInput && !adviceText) return
+    if (!showTradeInput && !adviceText) return
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (adviceText) dismissAdvice()
-        else if (showBetInput) dismissBetInput()
+        else if (showTradeInput) dismissTradeInput()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [showBetInput, dismissBetInput, adviceText, dismissAdvice])
+  }, [showTradeInput, dismissTradeInput, adviceText, dismissAdvice])
 
-  // Auto-dismiss bet confirmation after 3 seconds
+  // Auto-dismiss trade confirmation after 3 seconds
   useEffect(() => {
-    if (!betConfirmation) return
-    const t = setTimeout(() => setBetConfirmation(null), 3000)
+    if (!tradeConfirmation) return
+    const t = setTimeout(() => setTradeConfirmation(null), 3000)
     return () => clearTimeout(t)
-  }, [betConfirmation])
+  }, [tradeConfirmation])
 
   const currentAnimation = waitingForFeed && stage === 4 ? 'idle' : isFeed ? 'idle' : (TIPS[stage]?.animation ?? 'idle')
   const waitingMessage = feedItems.length === 0 ? 'Loading shorts...' : 'Hang tight...'
   const currentTipText = isFeed ? FEED_TIP : (waitingForFeed && stage === 4 ? waitingMessage : (TIPS[stage]?.text ?? ''))
 
-  const overlayActive = !!betConfirmation || !!showBetInput || !!adviceText
+  const overlayActive = !!tradeConfirmation || !!showTradeInput || !!adviceText
 
   // rotationY per stage: point stages face toward phone, feed faces phone more
   const currentRotationY = isFeed ? 0.8 : (currentAnimation === 'point' ? 0.4 : 0.3)
@@ -644,11 +644,11 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* Tutorial bet card preview — stages 3-4 only */}
+        {/* Tutorial trade card preview — stages 3-4 only */}
         <AnimatePresence>
           {!isFeed && stage >= 3 && (
             <motion.div
-              key="tutorial-bet"
+              key="tutorial-trade"
               className="absolute left-[calc(50%+240px)] w-[360px] rounded-2xl p-3"
               initial={{ x: 40, opacity: 0, rotate: 2 }}
               animate={{ x: 0, opacity: 1, rotate: 0 }}
@@ -701,11 +701,11 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* Feed bet card + chart — stage 5 */}
+        {/* Feed trade card + chart — stage 5 */}
         <AnimatePresence>
           {isFeed && currentMarkets.length > 0 && expandedMarket && (
             <motion.div
-              key="feed-bet"
+              key="feed-trade"
               className="flex flex-col gap-3 w-[640px] flex-shrink-0"
               initial={{ x: 40, opacity: 0, rotate: 2 }}
               animate={overlayActive
@@ -766,13 +766,13 @@ export default function Home() {
                   <div className="flex gap-2">
                     <button
                       className="px-4 py-2 text-sm glass-btn-yes"
-                      onClick={() => handleBet('YES')}
+                      onClick={() => handleTrade('YES')}
                     >
                       Yes {expandedMarket.yes_price != null && <span className="opacity-70">{expandedMarket.yes_price}¢</span>}
                     </button>
                     <button
                       className="px-4 py-2 text-sm glass-btn-no"
-                      onClick={() => handleBet('NO')}
+                      onClick={() => handleTrade('NO')}
                     >
                       No {expandedMarket.no_price != null && <span className="opacity-70">{expandedMarket.no_price}¢</span>}
                     </button>
@@ -862,12 +862,12 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* Bet confirmation overlay */}
+        {/* Trade confirmation overlay */}
         <AnimatePresence>
-          {betConfirmation && (
+          {tradeConfirmation && (
             <>
             <motion.div
-              key="bet-backdrop"
+              key="trade-backdrop"
               className="fixed inset-0 z-40"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -876,7 +876,7 @@ export default function Home() {
               style={{ background: 'rgba(0, 0, 0, 0.6)' }}
             />
             <motion.div
-              key="bet-confirmation"
+              key="trade-confirmation"
               className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -890,7 +890,7 @@ export default function Home() {
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.5, delay: 0.15, ease: easeCubic }}
                 >
-                  <SpeechBubble text={betConfirmation.message} large />
+                  <SpeechBubble text={tradeConfirmation.message} large />
                 </motion.div>
                 <motion.div
                   initial={{ opacity: 0, y: 40 }}
@@ -910,22 +910,22 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* Bet amount input overlay (AI reels only) */}
+        {/* Trade amount input overlay (AI reels only) */}
         <AnimatePresence>
-          {showBetInput && (
+          {showTradeInput && (
             <>
               <motion.div
-                key="bet-input-backdrop"
+                key="trade-input-backdrop"
                 className="fixed inset-0 z-40"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3 }}
                 style={{ background: 'rgba(0, 0, 0, 0.6)' }}
-                onClick={dismissBetInput}
+                onClick={dismissTradeInput}
               />
               <motion.div
-                key="bet-input-modal"
+                key="trade-input-modal"
                 className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -969,7 +969,7 @@ export default function Home() {
                       <div className="flex-1">
                         <p className="text-white/90 text-sm leading-snug line-clamp-2">{expandedMarket?.question}</p>
                         <p className="text-emerald-400 text-xs mt-0.5">
-                          Buy {showBetInput.side}
+                          Buy {showTradeInput.side}
                         </p>
                       </div>
                     </div>
@@ -979,9 +979,9 @@ export default function Home() {
                       <div
                         className="flex-1 py-2 rounded-xl text-center text-sm font-medium transition-colors"
                         style={{
-                          background: showBetInput.side === 'YES' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-                          border: showBetInput.side === 'YES' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid rgba(255,255,255,0.15)',
-                          color: showBetInput.side === 'YES' ? 'rgb(52, 211, 153)' : 'rgba(255,255,255,0.4)',
+                          background: showTradeInput.side === 'YES' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                          border: showTradeInput.side === 'YES' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid rgba(255,255,255,0.15)',
+                          color: showTradeInput.side === 'YES' ? 'rgb(52, 211, 153)' : 'rgba(255,255,255,0.4)',
                         }}
                       >
                         Yes {expandedMarket?.yes_price ?? 50}¢
@@ -989,9 +989,9 @@ export default function Home() {
                       <div
                         className="flex-1 py-2 rounded-xl text-center text-sm font-medium transition-colors"
                         style={{
-                          background: showBetInput.side === 'NO' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                          border: showBetInput.side === 'NO' ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(255,255,255,0.15)',
-                          color: showBetInput.side === 'NO' ? 'rgb(248, 113, 113)' : 'rgba(255,255,255,0.4)',
+                          background: showTradeInput.side === 'NO' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                          border: showTradeInput.side === 'NO' ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(255,255,255,0.15)',
+                          color: showTradeInput.side === 'NO' ? 'rgb(248, 113, 113)' : 'rgba(255,255,255,0.4)',
                         }}
                       >
                         No {expandedMarket?.no_price ?? 50}¢
@@ -1012,13 +1012,13 @@ export default function Home() {
                           type="number"
                           min="1"
                           step="1"
-                          value={betAmount}
-                          onChange={(e) => setBetAmount(e.target.value)}
+                          value={tradeAmount}
+                          onChange={(e) => setTradeAmount(e.target.value)}
                           placeholder="0"
                           autoFocus
                           className="w-24 bg-transparent text-white text-2xl font-semibold outline-none text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') submitBetAdvice()
+                            if (e.key === 'Enter') submitTradeAdvice()
                           }}
                         />
                       </div>
@@ -1026,10 +1026,10 @@ export default function Home() {
 
                     {/* Odds & Payout */}
                     {(() => {
-                      const price = showBetInput.side === 'YES'
+                      const price = showTradeInput.side === 'YES'
                         ? (expandedMarket?.yes_price ?? 50)
                         : (expandedMarket?.no_price ?? 50)
-                      const amt = parseFloat(betAmount) || 0
+                      const amt = parseFloat(tradeAmount) || 0
                       const payout = amt > 0 && price > 0 ? (amt / price) * 100 : 0
                       return (
                         <div className="flex items-center justify-between mb-5">
@@ -1038,7 +1038,7 @@ export default function Home() {
                             <p className="text-white/80 text-sm font-medium">{price}% chance</p>
                           </div>
                           <div className="text-right">
-                            <p className="text-white/40 text-xs">Payout if {showBetInput.side}</p>
+                            <p className="text-white/40 text-xs">Payout if {showTradeInput.side}</p>
                             <p className="text-emerald-400 text-xl font-semibold">
                               ${payout > 0 ? payout.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}
                             </p>
@@ -1050,14 +1050,14 @@ export default function Home() {
                     {/* Actions */}
                     <div className="flex gap-3">
                       <button
-                        onClick={dismissBetInput}
+                        onClick={dismissTradeInput}
                         className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer bg-white/[0.08] border border-white/15 text-white/50 hover:bg-white/20 hover:text-white/70"
                       >
                         Cancel
                       </button>
                       <button
-                        onClick={submitBetAdvice}
-                        disabled={adviceLoading || !betAmount || parseFloat(betAmount) <= 0}
+                        onClick={submitTradeAdvice}
+                        disabled={adviceLoading || !tradeAmount || parseFloat(tradeAmount) <= 0}
                         className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/40 hover:border-emerald-500/60 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {adviceLoading ? 'Asking Joe...' : 'Ask Joe'}

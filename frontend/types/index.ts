@@ -32,7 +32,7 @@ export interface FeedItem {
   youtube: YouTubeShort
   video?: VideoMedia
   isInjected?: boolean
-  injectedByBetSide?: 'YES' | 'NO'
+  injectedByTradeSide?: 'YES' | 'NO'
 }
 
 export interface JobStatus {
@@ -40,7 +40,7 @@ export interface JobStatus {
   status: 'waiting' | 'done' | 'error'
   video_url?: string | null
   error: string | null
-  original_bet_link?: string | null
+  original_trade_link?: string | null
 }
 
 export interface GeneratedVideo {

@@ -4,14 +4,14 @@ import { useState, useCallback } from 'react'
 import Image from 'next/image'
 import { KalshiMarket } from '@/types'
 
-interface BetPlacementCardProps {
+interface TradePlacementCardProps {
   market: KalshiMarket
   initialSide: 'YES' | 'NO'
   onSubmit: (data: { side: 'YES' | 'NO'; amount: number }) => void
   onClose: () => void
 }
 
-export default function BetPlacementCard({ market, initialSide, onSubmit, onClose }: BetPlacementCardProps) {
+export default function TradePlacementCard({ market, initialSide, onSubmit, onClose }: TradePlacementCardProps) {
   const [side, setSide] = useState<'YES' | 'NO'>(initialSide)
   const [amount, setAmount] = useState('')
   const [imgError, setImgError] = useState(false)

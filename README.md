@@ -12,9 +12,9 @@ https://github.com/user-attachments/assets/e0e68e53-62f0-4264-a490-565823de1e67
 | Feature | Description |
 | --- | --- |
 | Shorts-to-Market Matching | Uses OpenAI + YouTube metadata to match each short to relevant Kalshi markets |
-| Multi-Market Bet Panel | Surfaces matched markets with YES/NO prices and quick selection |
+| Multi-Market Trade Panel | Surfaces matched markets with YES/NO prices and quick selection |
 | Historical Price Charts | Pulls Kalshi candlesticks and renders interactive price history |
-| Guided Betting Overlay | Includes a tutorial flow, 3D character coach, and external-bet warning |
+| Guided Trading Overlay | Includes a tutorial flow, 3D character coach, and external-trade warning |
 | Injected Visualization Reels | After a YES/NO action, themed MP4 clips are inserted into the feed |
 | Async Video Job Pipeline | Backend supports Gemini + Veo generation with Cloud Storage + Cloud Tasks |
 
@@ -104,7 +104,7 @@ Then copy the emitted values into `backend/.env`.
 3. Advance through the tutorial (spacebar).
 4. Scroll the Shorts feed.
 5. Review matched Kalshi markets and price chart context.
-6. Click YES or NO to simulate a bet and inject visualization clips.
+6. Click YES or NO to simulate a trade and inject visualization clips.
 7. Use "View on Kalshi" to continue externally if needed.
 
 ## API Surface
@@ -113,7 +113,7 @@ Then copy the emitted values into `backend/.env`.
 | `/shorts/feed` | GET | Batch-match YouTube IDs to Kalshi markets |
 | `/shorts/match` | GET | Match one video to markets |
 | `/shorts/candlesticks` | GET | Retrieve price history for charting |
-| `/shorts/advice` | POST | Generate short bet commentary |
+| `/shorts/advice` | POST | Generate short trade commentary |
 | `/jobs/create` | POST | Create an async AI video generation job |
 | `/jobs/status/{job_id}` | GET | Poll job status |
 | `/worker/process` | POST | Worker endpoint for queued generation jobs |

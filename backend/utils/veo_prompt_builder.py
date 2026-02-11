@@ -114,7 +114,7 @@ def _domain_style(title: str, outcome: str) -> str:
 def create_video_prompt(
     title: str,
     outcome: str,
-    original_bet_link: str,
+    original_trade_link: str,
 ) -> str:
     """
     Build a high-quality Veo prompt for an 8-second vertical clip.
