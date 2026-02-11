@@ -29,6 +29,8 @@ class Jobs(APIController):
                 or payload.get("bet")
             ),
             "source_image_url": payload.get("source_image_url") or payload.get("sourceImageUrl"),
+            "kalshi": payload.get("kalshi"),
+            "bet_side": payload.get("bet_side"),
         }
         
     @get("/health")
@@ -80,11 +82,16 @@ class Jobs(APIController):
                 status=400,
             )
 
+        kalshi = payload.get("kalshi")
+        bet_side = payload.get("bet_side")
+
         job_request = VideoJobRequest(
             title=title,
             outcome=outcome,
             original_bet_link=original_bet_link,
             source_image_url=source_image_url or None,
+            kalshi=kalshi,
+            bet_side=bet_side,
         )
 
         log_api("/create", "Creating video job...")

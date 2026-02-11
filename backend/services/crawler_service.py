@@ -10,16 +10,30 @@ from services.youtube_service import YoutubeService
 from utils.env import settings
 
 SEARCH_QUERIES = [
-    "trending shorts",
-    "sports highlights shorts",
-    "crypto news shorts",
-    "stock market shorts",
-    "nfl shorts",
-    "nba shorts",
-    "weather news shorts",
-    "politics shorts",
-    "election shorts",
-    "finance shorts",
+    # Sports
+    "nfl highlights today",
+    "nba highlights tonight",
+    "super bowl shorts",
+    "march madness shorts",
+    # Crypto / Finance
+    "bitcoin price today shorts",
+    "crypto news today shorts",
+    "stock market today shorts",
+    "tesla stock shorts",
+    # Pop culture / Gen-Z
+    "drake shorts",
+    "elon musk shorts",
+    "kanye shorts",
+    "taylor swift shorts",
+    "mr beast shorts",
+    # Tech
+    "ai news shorts",
+    "tech news today shorts",
+    "apple shorts",
+    # Politics / Current events
+    "trump shorts",
+    "politics today shorts",
+    "election news shorts",
 ]
 
 
@@ -42,7 +56,7 @@ class CrawlerService:
             "q": query,
             "type": "video",
             "videoDuration": "short",
-            "order": "date",
+            "order": "relevance",
             "maxResults": max_results,
             "key": self.api_key,
         }

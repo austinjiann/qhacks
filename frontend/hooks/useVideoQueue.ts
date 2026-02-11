@@ -2,12 +2,13 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { FeedItem, KalshiMarket } from '@/types'
-import { findVisualizationBySeriesTicker } from '@/mystery'
 
 const SESSION_RESULTS_KEY = 'feed_results'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const BATCH_SIZE = 10
 const GENERATED_POLL_INTERVAL = 30_000
+const PREFETCH_THRESHOLD = 15
+const QUEUE_MAX = 25
 
 function saveFeedResults(items: FeedItem[]) {
   if (typeof window === 'undefined') return
@@ -36,6 +37,7 @@ export function useVideoQueue() {
   const initializedRef = useRef(false)
   const seenVideoIds = useRef<Set<string>>(new Set())
   const fetchingMore = useRef(false)
+  const currentIndexRef = useRef(0)
 
   // Load cached results or fetch initial batch on mount
   useEffect(() => {
@@ -84,14 +86,22 @@ export function useVideoQueue() {
     }
   }, [])
 
+  const setCurrentIndex = useCallback((index: number) => {
+    currentIndexRef.current = index
+  }, [])
+
   // Request more items when user nears end of feed
-  const requestMore = useCallback(() => {
+  const requestMore = useCallback((currentIndex?: number) => {
     if (fetchingMore.current || isLoading) return
+    const idx = currentIndex ?? currentIndexRef.current
+    const unwatched = feedItems.length - idx
+    if (unwatched >= QUEUE_MAX || unwatched > PREFETCH_THRESHOLD) return
+
     fetchingMore.current = true
     fetchBatch(BATCH_SIZE).finally(() => {
       fetchingMore.current = false
     })
-  }, [fetchBatch, isLoading])
+  }, [fetchBatch, isLoading, feedItems.length])
 
   // Poll for generated videos every 30s
   useEffect(() => {
@@ -133,31 +143,30 @@ export function useVideoQueue() {
     }
   }, [])
 
-  const insertMp4 = useCallback((
-    currentIndex: number,
+  const requestVideoGeneration = useCallback(async (
     market: KalshiMarket,
     betSide: 'YES' | 'NO'
   ) => {
-    const entry = findVisualizationBySeriesTicker(market.series_ticker, market.question)
-    if (!entry || entry.source.type !== 'mp4') return
-
-    const injectedItem: FeedItem = {
-      id: `injected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      youtube: { video_id: '', title: '', thumbnail: '', channel: '' },
-      video: { type: 'mp4', url: entry.source.url, title: entry.label },
-      kalshi: [market],
-      isInjected: true,
-      injectedByBetSide: betSide,
+    try {
+      const res = await fetch(`${API_URL}/jobs/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: market.question,
+          outcome: `${betSide} - ${market.question}`,
+          original_bet_link: `https://kalshi.com/events/${market.event_ticker || market.ticker}`,
+          source_image_url: market.image_url || undefined,
+          kalshi: [market],
+          bet_side: betSide,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to queue video generation')
+      const data = await res.json()
+      return data.job_id as string
+    } catch (err) {
+      console.error('Video generation request failed:', err)
+      return null
     }
-
-    const offset = 4 + Math.floor(Math.random() * 2) // 4 or 5
-
-    setFeedItems(prev => {
-      const insertIdx = Math.min(currentIndex + offset, prev.length)
-      const next = [...prev]
-      next.splice(insertIdx, 0, injectedItem)
-      return next
-    })
   }, [])
 
   const retryFailed = useCallback(() => {
@@ -188,7 +197,8 @@ export function useVideoQueue() {
     isProcessing: isLoading,
     retryFailed,
     clearQueue,
-    insertMp4,
+    requestVideoGeneration,
     requestMore,
+    setCurrentIndex,
   }
 }

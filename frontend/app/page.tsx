@@ -146,7 +146,7 @@ function SpeechBubble({ text, children, large }: { text?: string; children?: Rea
 }
 
 export default function Home() {
-  const { feedItems, feedError, isProcessing, retryFailed, clearQueue, insertMp4, requestMore } = useVideoQueue()
+  const { feedItems, feedError, isProcessing, retryFailed, clearQueue, requestVideoGeneration, requestMore, setCurrentIndex } = useVideoQueue()
   const currentIndexRef = useRef(0)
   const [currentMarkets, setCurrentMarkets] = useState<KalshiMarket[]>([])
   const [selectedIdx, setSelectedIdx] = useState(0)
@@ -429,21 +429,22 @@ export default function Home() {
       return
     }
 
-    insertMp4(currentIndexRef.current, expandedMarket, side)
+    requestVideoGeneration(expandedMarket, side)
 
     setBetConfirmation({
       side,
-      message: `You bet ${side}! Keep scrolling! Your bet is coming to life!`,
+      message: `You bet ${side}! Your bet video is being generated!`,
     })
-  }, [expandedMarket, insertMp4, currentIsInjected])
+  }, [expandedMarket, requestVideoGeneration, currentIsInjected])
 
   const handleCurrentItemChange = useCallback((item: { kalshi?: KalshiMarket[]; isInjected?: boolean }, index: number) => {
     currentIndexRef.current = index
+    setCurrentIndex(index)
     setCurrentMarkets(item.kalshi ?? [])
     setSelectedIdx(0)
     setImgError(false)
     setCurrentIsInjected(!!item.isInjected)
-  }, [])
+  }, [setCurrentIndex])
 
   const handleChartReady = useCallback(
     (ticker: string, payload?: PriceChartReadyPayload) => {
@@ -551,7 +552,7 @@ export default function Home() {
 
   // Phone content shared by both tutorial and feed views
   const phoneContent = feedItems.length > 0 ? (
-    <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} onNearEnd={requestMore} paused={overlayActive} />
+    <Feed ref={feedRef} items={feedItems} onCurrentItemChange={handleCurrentItemChange} onNearEnd={(idx) => requestMore(idx)} paused={overlayActive} />
   ) : (
     <div className="flex flex-col items-center justify-center h-full bg-black gap-3 p-4">
       <div className="text-white/30 text-sm">

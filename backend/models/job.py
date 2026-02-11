@@ -9,6 +9,8 @@ class VideoJobRequest:
     outcome: str
     original_bet_link: str
     source_image_url: Optional[str] = None  # Optional real image to use as base
+    kalshi: Optional[list] = None  # Market data to attach to generated video
+    bet_side: Optional[str] = None  # YES or NO
 
 @dataclass
 class JobStatus:

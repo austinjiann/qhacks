@@ -247,6 +247,8 @@ class JobService:
             "outcome": request.outcome,
             "original_bet_link": request.original_bet_link,
             "source_image_url": request.source_image_url,
+            "kalshi": request.kalshi,
+            "bet_side": request.bet_side,
         }
 
         if self.cloud_tasks:
@@ -317,6 +319,8 @@ class JobService:
                 "outcome": outcome,
                 "original_bet_link": original_bet_link,
                 "image_uri": image_uri,
+                "kalshi": job_data.get("kalshi"),
+                "bet_side": job_data.get("bet_side"),
             })
             print(f"[{jid}] Video processing started", flush=True)
 

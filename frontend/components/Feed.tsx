@@ -7,7 +7,7 @@ import ShortCard from './ShortCard'
 interface FeedProps {
   items: FeedItem[]
   onCurrentItemChange?: (item: FeedItem, index: number) => void
-  onNearEnd?: () => void
+  onNearEnd?: (currentIndex: number) => void
   paused?: boolean
 }
 
@@ -56,7 +56,7 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
     }
     // Trigger fetch more when near end of feed
     if (index >= itemsRef.current.length - 3) {
-      onNearEndRef.current?.()
+      onNearEndRef.current?.(index)
     }
   }, [])
 

@@ -11,7 +11,13 @@ from google.cloud.firestore_v1 import query as firestore_query
 class FirestoreService:
     def __init__(self) -> None:
         if not firebase_admin._apps:
-            firebase_admin.initialize_app()
+            import os
+            cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            if cred_path and os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+            else:
+                firebase_admin.initialize_app()
         self.db: AsyncClient = firestore_async.client()
 
     # ── feed_pool CRUD ──
