@@ -14,6 +14,7 @@
     "@types/three": "^0.182.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "firebase": "^12.9.0",
     "framer-motion": "^12.33.0",
     "lightweight-charts": "^4.2.3",
     "lucide-react": "^0.563.0",

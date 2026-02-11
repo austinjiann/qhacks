@@ -11,7 +11,7 @@ from typing import Optional
 from urllib.parse import urlparse
 from google.cloud import storage
 import aiohttp
-from models.job import JobStatus, VideoJobRequest
+from models.job import VideoJobRequest
 from services.firestore_service import FirestoreService
 from services.vertex_service import VertexService
 from utils.env import settings
@@ -106,30 +106,7 @@ class JobService:
                 logger.error(f"Failed to initialize GCS job persistence: {exc}")
         else:
             logger.warning("GOOGLE_CLOUD_BUCKET_NAME not set - job persistence disabled")
-        
-        self._bucket_cache: dict[str, storage.Bucket] = {}
 
-    def _split_gs_uri(self, gs_uri: str) -> tuple[str, str] | None:
-        if not gs_uri or not gs_uri.startswith("gs://"):
-            return None
-        path = gs_uri[5:]
-        if "/" not in path:
-            return None
-        bucket_name, blob_name = path.split("/", 1)
-        if not bucket_name or not blob_name:
-            return None
-        return bucket_name, blob_name
-
-    def _get_bucket(self, bucket_name: str) -> Optional[storage.Bucket]:
-        if not bucket_name or not self.storage_client:
-            return None
-        if self.bucket and self.bucket.name == bucket_name:
-            return self.bucket
-        if bucket_name in self._bucket_cache:
-            return self._bucket_cache[bucket_name]
-        bucket = self.storage_client.bucket(bucket_name)
-        self._bucket_cache[bucket_name] = bucket
-        return bucket
 
     def _image_blob_path(self, job_id: str, image_num: int) -> str:
         return f"images/{job_id}/image{image_num}.png"
@@ -229,6 +206,8 @@ class JobService:
 
     async def create_video_job(self, request: VideoJobRequest) -> str:
         job_id = str(uuid.uuid4())
+        jid = job_id[:8]
+        print(f"[{jid}] [pipeline] 5. create_video_job — title=\"{request.title[:50]}\"", flush=True)
 
         await self._save_job(
             job_id,
@@ -241,6 +220,7 @@ class JobService:
                 "source_image_url": request.source_image_url,
             },
         )
+        print(f"[{jid}] [pipeline] ↳ Job saved to GCS with status=pending", flush=True)
 
         job_data = {
             "title": request.title,
@@ -252,11 +232,14 @@ class JobService:
         }
 
         if self.cloud_tasks:
+            print(f"[{jid}] [pipeline] ↳ Enqueueing to Cloud Tasks", flush=True)
             self.cloud_tasks.enqueue_video_job(job_id, job_data)
         else:
+            print(f"[{jid}] [pipeline] ↳ Enqueueing to local worker queue", flush=True)
             await self._ensure_local_worker()
             await self.local_queue.put({"job_id": job_id, **job_data})
 
+        print(f"[{jid}] [pipeline] 6. Job queued — returning job_id to frontend", flush=True)
         return job_id
 
     async def process_video_job(self, job_id: str, job_data: dict):
@@ -264,6 +247,7 @@ class JobService:
         jid = job_id[:8]
         start_time = datetime.now().isoformat()
         existing_job = await self._load_job(job_id)
+        print(f"[{jid}] [pipeline] 7. process_video_job START", flush=True)
 
         try:
             title = job_data["title"]
@@ -276,14 +260,15 @@ class JobService:
             # starting frame
             source_image = None
             if source_image_url:
+                print(f"[{jid}] [pipeline] 7a. Fetching source image from URL: {source_image_url[:80]}", flush=True)
                 source_image = await fetch_image_from_url(source_image_url)
                 if source_image:
-                    print(f"[{jid}] Using provided source image ({len(source_image)} bytes)", flush=True)
+                    print(f"[{jid}] [pipeline] ↳ Source image fetched ({len(source_image)} bytes)", flush=True)
                 else:
-                    print(f"[{jid}] source_image_url could not be fetched; will generate via Gemini", flush=True)
+                    print(f"[{jid}] [pipeline] ↳ Source image fetch FAILED, will generate via Gemini", flush=True)
 
             if not source_image:
-                print(f"[{jid}] Generating starting frame via Gemini...", flush=True)
+                print(f"[{jid}] [pipeline] 7b. Generating starting frame via Gemini Imagen...", flush=True)
                 image_prompt = create_first_image_prompt(
                     title=title,
                     outcome=outcome,
@@ -291,16 +276,19 @@ class JobService:
                 )
                 source_image = await self.vertex_service.generate_starting_frame(image_prompt)
                 if source_image:
-                    print(f"[{jid}] Gemini starting frame generated ({len(source_image)} bytes)", flush=True)
+                    print(f"[{jid}] [pipeline] ↳ Gemini starting frame generated ({len(source_image)} bytes)", flush=True)
                 else:
                     raise ValueError("Failed to generate starting frame via Gemini and no source image provided")
 
             # starting frame -> GCS
             image_uri = ""
             if self.bucket and source_image:
+                print(f"[{jid}] [pipeline] 7c. Uploading starting frame to GCS...", flush=True)
                 image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, source_image)
+                print(f"[{jid}] [pipeline] ↳ Uploaded: {image_uri}", flush=True)
 
             # generate video with prompt and inputs
+            print(f"[{jid}] [pipeline] 8. Submitting to Veo for video generation (720p)...", flush=True)
             veo_prompt = create_video_prompt(
                 title=title,
                 outcome=outcome,
@@ -310,6 +298,7 @@ class JobService:
                 prompt=veo_prompt,
                 image_data=source_image,
             )
+            print(f"[{jid}] [pipeline] ↳ Veo operation started: {operation.name}", flush=True)
 
             await self._save_job(job_id, {
                 "status": "processing",
@@ -322,10 +311,77 @@ class JobService:
                 "kalshi": job_data.get("kalshi"),
                 "trade_side": job_data.get("trade_side"),
             })
-            print(f"[{jid}] Video processing started", flush=True)
+            print(f"[{jid}] [pipeline] ↳ Job saved with status=processing, polling Veo until done...", flush=True)
+
+            # Poll Veo until video is ready (or error/timeout)
+            max_polls = 60  # ~5 minutes at 5s intervals
+            for poll_num in range(1, max_polls + 1):
+                await asyncio.sleep(5)
+                print(f"[{jid}] [pipeline] 9a. Polling Veo (attempt {poll_num}/{max_polls})...", flush=True)
+                result = await self.vertex_service.get_video_status_by_name(operation.name)
+                print(f"[{jid}] [pipeline] ↳ Veo status: {result.status}", flush=True)
+
+                if result.status == "done":
+                    video_uri = result.video_url
+                    video_url = self._generate_signed_url(video_uri) if video_uri else None
+                    print(f"[{jid}] [pipeline] 9b. Veo DONE — video_url={video_url}", flush=True)
+
+                    await self._save_job(job_id, {
+                        "status": "done",
+                        "video_uri": video_uri,
+                        "video_url": video_url,
+                        "job_start_time": existing_job.get("job_start_time") if existing_job else start_time,
+                        "job_end_time": datetime.now().isoformat(),
+                        "title": title,
+                        "outcome": outcome,
+                        "original_trade_link": original_trade_link,
+                        "image_uri": image_uri,
+                        "operation_name": operation.name,
+                        "kalshi": job_data.get("kalshi"),
+                        "trade_side": job_data.get("trade_side"),
+                    })
+
+                    try:
+                        print(f"[{jid}] [pipeline] 9c. Storing in Firestore generated_videos...", flush=True)
+                        await self.firestore_service.store_generated_video(job_id, {
+                            "video_url": video_url,
+                            "title": title,
+                            "kalshi": job_data.get("kalshi", []),
+                            "trade_side": job_data.get("trade_side", ""),
+                        })
+                        print(f"[{jid}] [pipeline] 9d. Stored in Firestore — ready for frontend poll!", flush=True)
+                    except Exception as fs_exc:
+                        print(f"[{jid}] [pipeline] ✗ Failed to store in Firestore: {fs_exc}", flush=True)
+                    break
+
+                if result.status == "error":
+                    print(f"[{jid}] [pipeline] ✗ Veo ERROR: {result.error}", flush=True)
+                    await self._save_job(job_id, {
+                        "status": "error",
+                        "error": result.error,
+                        "job_start_time": existing_job.get("job_start_time") if existing_job else start_time,
+                        "title": title,
+                        "outcome": outcome,
+                        "original_trade_link": original_trade_link,
+                        "operation_name": operation.name,
+                    })
+                    break
+            else:
+                # Timed out after all polls
+                print(f"[{jid}] [pipeline] ✗ Veo TIMEOUT after {max_polls * 5}s", flush=True)
+                await self._save_job(job_id, {
+                    "status": "error",
+                    "error": f"Veo timed out after {max_polls * 5} seconds",
+                    "job_start_time": existing_job.get("job_start_time") if existing_job else start_time,
+                    "title": title,
+                    "outcome": outcome,
+                    "original_trade_link": original_trade_link,
+                    "operation_name": operation.name,
+                })
 
         except Exception as exc:
-            print(f"[{jid}] ERROR: {exc}", flush=True)
+            print(f"[{jid}] [pipeline] ✗ ERROR in process_video_job: {exc}", flush=True)
+            traceback.print_exc()
             await self._save_job(job_id, {
                 "status": "error",
                 "error": str(exc),
@@ -334,66 +390,3 @@ class JobService:
                 "outcome": job_data.get("outcome") or job_data.get("caption"),
                 "original_trade_link": job_data.get("original_trade_link"),
             })
-
-    async def get_job_status(self, job_id: str) -> Optional[JobStatus]:
-        job = await self._load_job(job_id)
-        if job is None:
-            return None
-
-        status = job.get("status")
-        job_start_time = (
-            datetime.fromisoformat(job["job_start_time"])
-            if job.get("job_start_time")
-            else None
-        )
-        job_end_time = (
-            datetime.fromisoformat(job["job_end_time"])
-            if job.get("job_end_time")
-            else None
-        )
-        original_trade_link = job.get("original_trade_link")
-        image_url = job.get("image_uri")
-
-        if status in ("pending", "queued"):
-            return JobStatus(status="waiting", job_start_time=job_start_time, original_trade_link=original_trade_link, image_url=image_url)
-
-        if status == "error":
-            return JobStatus(status="error", job_start_time=job_start_time, job_end_time=job_end_time, error=job.get("error"), original_trade_link=original_trade_link, image_url=image_url)
-
-        if status == "done":
-            video_url = job.get("video_url")
-            video_uri = job.get("video_uri")
-            if video_uri:
-                video_url = self._generate_signed_url(video_uri)
-            return JobStatus(status="done", job_start_time=job_start_time, job_end_time=job_end_time, video_url=video_url, original_trade_link=original_trade_link, image_url=image_url)
-
-        if status == "processing" and job.get("operation_name"):
-            result = await self.vertex_service.get_video_status_by_name(job["operation_name"])
-            if result.status == "done":
-                video_uri = result.video_url
-                video_url = self._generate_signed_url(video_uri) if video_uri else None
-                job["status"] = "done"
-                job["video_uri"] = video_uri
-                job["video_url"] = video_url
-                job["job_end_time"] = datetime.now().isoformat()
-                await self._save_job(job_id, job)
-                print(f"[{job_id[:8]}] Video complete", flush=True)
-                # Store in Firestore generated_videos collection for frontend polling
-                try:
-                    await self.firestore_service.store_generated_video(job_id, {
-                        "video_url": video_url,
-                        "title": job.get("title", ""),
-                        "kalshi": job.get("kalshi", []),
-                        "trade_side": job.get("trade_side", ""),
-                    })
-                except Exception as fs_exc:
-                    logger.error(f"[{job_id[:8]}] Failed to store generated video in Firestore: {fs_exc}")
-                return JobStatus(status="done", job_start_time=job_start_time, job_end_time=job_end_time, video_url=video_url, original_trade_link=original_trade_link, image_url=image_url)
-            if result.status == "error":
-                job["status"] = "error"
-                job["error"] = result.error
-                await self._save_job(job_id, job)
-                return JobStatus(status="error", error=result.error, original_trade_link=original_trade_link, image_url=image_url)
-            return JobStatus(status="waiting", job_start_time=job_start_time, original_trade_link=original_trade_link, image_url=image_url)
-
-        return JobStatus(status="waiting", job_start_time=job_start_time, original_trade_link=original_trade_link, image_url=image_url)

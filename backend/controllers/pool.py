@@ -1,4 +1,4 @@
-from blacksheep import json, Request
+from blacksheep import json
 from blacksheep.server.controllers import APIController, get, post
 
 from services.firestore_service import FirestoreService
@@ -27,20 +27,6 @@ class Pool(APIController):
                 "source": item.get("source", ""),
             })
         return json(feed)
-
-    @get("/generated")
-    async def get_generated(self):
-        videos = await self.firestore_service.get_unconsumed_generated_videos()
-        result = []
-        for v in videos:
-            result.append({
-                "job_id": v.get("job_id", ""),
-                "video_url": v.get("video_url", ""),
-                "title": v.get("title", ""),
-                "kalshi": v.get("kalshi", []),
-                "trade_side": v.get("trade_side", ""),
-            })
-        return json(result)
 
     @post("/generated/{job_id}/consume")
     async def consume_generated(self, job_id: str):

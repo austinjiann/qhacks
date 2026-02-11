@@ -77,7 +77,7 @@ class VertexService:
                 "random extra characters, sudden outfit changes, disappearing equipment, "
                 "helmetless football players, broken sports gear continuity"
             ),
-            "resolution": "1080p",
+            "resolution": "720p",
         }
         try:
             config = GenerateVideosConfig(**config_kwargs)
@@ -97,12 +97,6 @@ class VertexService:
             config=config,
         )
         return operation
-
-    async def get_video_status(self, operation: GenerateVideosOperation) -> JobStatus:
-        operation = self.client.operations.get(operation)
-        if operation.done and operation.result and operation.result.generated_videos:
-            return JobStatus(status="done", job_start_time=None, video_url=operation.result.generated_videos[0].video.uri)
-        return JobStatus(status="waiting", job_start_time=None, video_url=None)
 
     async def get_video_status_by_name(self, operation_name: str) -> JobStatus:
         """Get video status by operation name (avoids serialization)"""

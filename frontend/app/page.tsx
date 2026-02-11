@@ -419,14 +419,16 @@ export default function Home() {
 
   const handleTrade = useCallback((side: 'YES' | 'NO') => {
     if (!expandedMarket) return
-    console.log(`Trade placed: ${side} on ${expandedMarket.ticker}`)
+    console.log(`[pipeline] 1. Trade button pressed: ${side} on ${expandedMarket.ticker}`)
 
     if (currentIsInjected) {
+      console.log('[pipeline] ↳ Injected reel — showing trade input instead of generating video')
       setShowTradeInput({ side })
       setTradeAmount('')
       return
     }
 
+    console.log('[pipeline] 2. Requesting video generation...')
     requestVideoGeneration(expandedMarket, side)
 
     setTradeConfirmation({
@@ -435,11 +437,32 @@ export default function Home() {
     })
   }, [expandedMarket, requestVideoGeneration, currentIsInjected])
 
-  const handleCurrentItemChange = useCallback((item: { kalshi?: KalshiMarket[]; isInjected?: boolean }, index: number) => {
+  const handleCurrentItemChange = useCallback((item: { kalshi?: KalshiMarket[]; youtube?: { title?: string }; isInjected?: boolean }, index: number) => {
     currentIndexRef.current = index
     setCurrentIndex(index)
-    setCurrentMarkets(item.kalshi ?? [])
-    setSelectedIdx(0)
+    const markets = item.kalshi ?? []
+    setCurrentMarkets(markets)
+
+    // Try to pick the most relevant market based on video title
+    let bestIdx = 0
+    if (markets.length > 1 && item.youtube?.title) {
+      const titleWords = item.youtube.title.toLowerCase().split(/\s+/)
+      let bestScore = 0
+      for (let i = 0; i < markets.length; i++) {
+        const qWords = markets[i].question.toLowerCase().split(/\s+/)
+        const score = titleWords.filter(w => w.length > 2 && qWords.includes(w)).length
+        if (score > bestScore) {
+          bestScore = score
+          bestIdx = i
+        }
+      }
+      // No match found — pick random instead of defaulting to 0
+      if (bestScore === 0) {
+        bestIdx = Math.floor(Math.random() * markets.length)
+      }
+    }
+    setSelectedIdx(bestIdx)
+
     setImgError(false)
     setCurrentIsInjected(!!item.isInjected)
   }, [setCurrentIndex])

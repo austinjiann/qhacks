@@ -1,18 +1,19 @@
 # Job controller for video generation pipeline
-import logging
 from datetime import datetime
 
-from blacksheep import json, Response
+from blacksheep import json
 from blacksheep.server.controllers import APIController, post, get
 from services.job_service import JobService
 from models.job import VideoJobRequest
-
-logger = logging.getLogger("jobs_controller")
 
 def log_api(endpoint: str, msg: str):
     print(f"[{datetime.now().isoformat()}] [API] {endpoint}: {msg}", flush=True)
 
 class Jobs(APIController):
+    @classmethod
+    def route(cls):
+        return "/jobs"
+
     def __init__(self, job_service: JobService):
         self.job_service = job_service
 
@@ -100,26 +101,3 @@ class Jobs(APIController):
         log_api("/create", f"Job created: {job_id}")
         log_api("/create", "Job queued to worker - pipeline starting in background")
         return json({"job_id": job_id})
-
-    @get("/status/{job_id}")
-    async def get_status(self, job_id: str) -> Response:
-        logger.debug(f"GET /api/jobs/status/{job_id}")
-        status = await self.job_service.get_job_status(job_id)
-
-        if status is None:
-            logger.warning(f"Job {job_id} not found")
-            return json({"error": "Job not found"}, status=404)
-
-        response_data = {
-            "status": status.status,
-            "video_url": status.video_url,
-            "error": status.error,
-            "original_trade_link": status.original_trade_link,
-            "image_url": status.image_url,
-        }
-        logger.debug(f"Job {job_id} status response: status={status.status}")
-        if status.image_url:
-            logger.info(f"Job {job_id} has image_url")
-        if status.status == "done":
-            logger.info(f"Job {job_id} DONE, video_url={status.video_url}")
-        return json(response_data)

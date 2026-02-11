@@ -13,27 +13,39 @@ SEARCH_QUERIES = [
     # Sports
     "nfl highlights today",
     "nba highlights tonight",
+    "mlb highlights today",
+    "nhl highlights today",
     "super bowl shorts",
-    "march madness shorts",
-    # Crypto / Finance
+    "soccer goals today shorts",
+    # Crypto
     "bitcoin price today shorts",
-    "crypto news today shorts",
+    "crypto market today shorts",
+    "ethereum news today shorts",
+    "xrp news today shorts",
+    # Financials / Indices
     "stock market today shorts",
-    "tesla stock shorts",
-    # Pop culture / Gen-Z
-    "drake shorts",
-    "elon musk shorts",
-    "kanye shorts",
-    "taylor swift shorts",
-    "mr beast shorts",
-    # Tech
-    "ai news shorts",
-    "tech news today shorts",
-    "apple shorts",
-    # Politics / Current events
-    "trump shorts",
-    "politics today shorts",
-    "election news shorts",
+    "nasdaq today shorts",
+    "dow jones today shorts",
+    # Politics
+    "trump news today shorts",
+    "election 2026 shorts",
+    "congress news today shorts",
+    # Climate
+    "hurricane news today shorts",
+    "extreme weather shorts",
+    "wildfire news shorts",
+    # Economics
+    "inflation news today shorts",
+    "fed rate decision shorts",
+    "recession news shorts",
+    # Companies
+    "tesla news today shorts",
+    "apple news today shorts",
+    "nvidia news today shorts",
+    # Tech & Science
+    "ai news today shorts",
+    "space news today shorts",
+    "chatgpt news shorts",
 ]
 
 
@@ -56,6 +68,7 @@ class CrawlerService:
             "q": query,
             "type": "video",
             "videoDuration": "short",
+            "videoEmbeddable": "true",
             "order": "relevance",
             "maxResults": max_results,
             "key": self.api_key,

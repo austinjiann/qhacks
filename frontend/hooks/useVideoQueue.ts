@@ -1,34 +1,14 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
 import { FeedItem, KalshiMarket } from '@/types'
 
-const SESSION_RESULTS_KEY = 'feed_results'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const BATCH_SIZE = 10
-const GENERATED_POLL_INTERVAL = 30_000
 const PREFETCH_THRESHOLD = 15
 const QUEUE_MAX = 25
-
-function saveFeedResults(items: FeedItem[]) {
-  if (typeof window === 'undefined') return
-  try {
-    sessionStorage.setItem(SESSION_RESULTS_KEY, JSON.stringify(items))
-  } catch { /* quota exceeded — non-critical */ }
-}
-
-function loadFeedResults(): FeedItem[] | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = sessionStorage.getItem(SESSION_RESULTS_KEY)
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed) || parsed.length === 0) return null
-    return parsed as FeedItem[]
-  } catch {
-    return null
-  }
-}
 
 export function useVideoQueue() {
   const [feedItems, setFeedItems] = useState<FeedItem[]>([])
@@ -44,16 +24,6 @@ export function useVideoQueue() {
     if (initializedRef.current) return
     initializedRef.current = true
 
-    const cached = loadFeedResults()
-    if (cached && cached.length > 0) {
-      setFeedItems(cached)
-      for (const item of cached) {
-        if (item.youtube?.video_id) seenVideoIds.current.add(item.youtube.video_id)
-      }
-      return
-    }
-
-    // Fetch initial batch
     fetchBatch(BATCH_SIZE)
   }, [])
 
@@ -73,12 +43,7 @@ export function useVideoQueue() {
         if (item.youtube?.video_id) seenVideoIds.current.add(item.youtube.video_id)
       }
 
-      setFeedItems(prev => {
-        const next = [...prev, ...results]
-        // Persist non-injected items
-        saveFeedResults(next.filter(i => !i.isInjected))
-        return next
-      })
+      setFeedItems(prev => [...prev, ...results])
     } catch (err) {
       setFeedError(String(err))
     } finally {
@@ -103,18 +68,23 @@ export function useVideoQueue() {
     })
   }, [fetchBatch, isLoading, feedItems.length])
 
-  // Poll for generated videos every 30s
+  // Real-time Firestore listener for generated videos
   useEffect(() => {
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API_URL}/pool/generated`)
-        if (!res.ok) return
-        const videos = await res.json()
-        if (!Array.isArray(videos) || videos.length === 0) return
+    const q = query(
+      collection(db, 'generated_videos'),
+      where('consumed', '==', false),
+    )
 
-        for (const video of videos) {
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        if (change.type === 'added') {
+          const video = change.doc.data()
+          const jobId = change.doc.id
+
+          console.log(`[pipeline] 10. Firestore snapshot: new video — job_id=${jobId}, url=${video.video_url}`)
+
           const injectedItem: FeedItem = {
-            id: `generated-${video.job_id}`,
+            id: `generated-${jobId}`,
             youtube: { video_id: '', title: video.title || '', thumbnail: '', channel: '' },
             video: { type: 'mp4', url: video.video_url, title: video.title },
             kalshi: video.kalshi || [],
@@ -123,30 +93,30 @@ export function useVideoQueue() {
           }
 
           setFeedItems(prev => {
-            // Don't add if already present
-            if (prev.some(item => item.id === injectedItem.id)) return prev
+            if (prev.some(item => item.id === injectedItem.id)) {
+              console.log(`[pipeline] ↳ Already in feed, skipping`)
+              return prev
+            }
+            console.log(`[pipeline] 11. Video injected at front of feed!`)
             return [injectedItem, ...prev]
           })
 
-          // Mark as consumed
-          fetch(`${API_URL}/pool/generated/${video.job_id}/consume`, { method: 'POST' }).catch(() => {})
+          // Mark as consumed via backend
+          fetch(`${API_URL}/pool/generated/${jobId}/consume`, { method: 'POST' }).catch(() => {})
         }
-      } catch { /* ignore polling errors */ }
-    }
+      }
+    }, (error) => {
+      console.error('[pipeline] Firestore listener error:', error)
+    })
 
-    const interval = setInterval(poll, GENERATED_POLL_INTERVAL)
-    // Run once on mount after a short delay
-    const timeout = setTimeout(poll, 3000)
-    return () => {
-      clearInterval(interval)
-      clearTimeout(timeout)
-    }
+    return () => unsubscribe()
   }, [])
 
   const requestVideoGeneration = useCallback(async (
     market: KalshiMarket,
     tradeSide: 'YES' | 'NO'
   ) => {
+    console.log(`[pipeline] 3. POST /jobs/create — title="${market.question}", side=${tradeSide}`)
     try {
       const res = await fetch(`${API_URL}/jobs/create`, {
         method: 'POST',
@@ -160,11 +130,15 @@ export function useVideoQueue() {
           trade_side: tradeSide,
         }),
       })
-      if (!res.ok) throw new Error('Failed to queue video generation')
+      if (!res.ok) {
+        console.error(`[pipeline] ✗ /jobs/create failed with status ${res.status}`)
+        throw new Error('Failed to queue video generation')
+      }
       const data = await res.json()
+      console.log(`[pipeline] 4. Job created — job_id=${data.job_id}`)
       return data.job_id as string
     } catch (err) {
-      console.error('Video generation request failed:', err)
+      console.error('[pipeline] ✗ Video generation request failed:', err)
       return null
     }
   }, [])
@@ -175,19 +149,12 @@ export function useVideoQueue() {
   }, [fetchBatch])
 
   const removeItem = useCallback((itemId: string) => {
-    setFeedItems(prev => {
-      const next = prev.filter(i => i.id !== itemId)
-      saveFeedResults(next.filter(i => !i.isInjected))
-      return next
-    })
+    setFeedItems(prev => prev.filter(i => i.id !== itemId))
   }, [])
 
   const clearQueue = useCallback(() => {
     setFeedItems([])
     seenVideoIds.current.clear()
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem(SESSION_RESULTS_KEY)
-    }
   }, [])
 
   const stats = useMemo(() => ({
