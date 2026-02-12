@@ -16,7 +16,8 @@ from services.firestore_service import FirestoreService
 from services.vertex_service import VertexService
 from utils.env import settings
 from utils.gemini_prompt_builder import create_first_image_prompt
-from utils.prompt_enhancer import sanitize_for_content_policy
+from utils.image_search import search_and_fetch_image
+from utils.prompt_enhancer import detect_and_sanitize
 from utils.veo_prompt_builder import create_video_prompt
 
 logger = logging.getLogger("job_service")
@@ -243,14 +244,6 @@ class JobService:
         print(f"[{jid}] [pipeline] 6. Job queued — returning job_id to frontend", flush=True)
         return job_id
 
-    @staticmethod
-    def _is_content_policy_error(error_text: str) -> bool:
-        """Check if a Veo error is a content policy / usage guideline violation."""
-        if not error_text:
-            return False
-        lower = error_text.lower()
-        return "usage guidelines" in lower or "could not be submitted" in lower or "violate" in lower
-
     async def _submit_and_poll_veo(
         self,
         jid: str,
@@ -262,7 +255,6 @@ class JobService:
         Returns (status, video_uri_or_error):
           - ("done", video_uri)
           - ("error", error_message)
-          - ("content_policy", error_message)
         """
         operation = await self.vertex_service.generate_video_content(
             prompt=veo_prompt,
@@ -281,15 +273,12 @@ class JobService:
                 return "done", result.video_url
 
             if result.status == "error":
-                error_msg = result.error or "Unknown Veo error"
-                if self._is_content_policy_error(error_msg):
-                    return "content_policy", error_msg
-                return "error", error_msg
+                return "error", result.error or "Unknown Veo error"
 
         return "error", f"Veo timed out after {max_polls * 5} seconds"
 
     async def process_video_job(self, job_id: str, job_data: dict):
-        #  Gemini starting frame -> Veo video
+        #  Detect real people → scrape photo → generic prompt → Veo video
         jid = job_id[:8]
         start_time = datetime.now().isoformat()
         existing_job = await self._load_job(job_id)
@@ -303,41 +292,69 @@ class JobService:
             original_trade_link = job_data["original_trade_link"]
             source_image_url = job_data.get("source_image_url")
 
-            # starting frame
+            # ── Step 1: Detect real people and sanitize upfront ──
+            print(f"[{jid}] [pipeline] 7a. Detecting real people in prompt...", flush=True)
+            analysis = await detect_and_sanitize(title, outcome)
+
+            # Decide which title/outcome to use for Veo (always safe versions)
+            veo_title = analysis.safe_title
+            veo_outcome = analysis.safe_outcome
+
+            if analysis.has_real_people:
+                print(f"[{jid}] [pipeline] ↳ Real people detected! Using safe prompt for Veo", flush=True)
+                print(f"[{jid}] [pipeline] ↳ Safe title: \"{veo_title}\"", flush=True)
+                print(f"[{jid}] [pipeline] ↳ Safe outcome: \"{veo_outcome}\"", flush=True)
+                print(f"[{jid}] [pipeline] ↳ Image search query: \"{analysis.image_search_query}\"", flush=True)
+            else:
+                print(f"[{jid}] [pipeline] ↳ No real people detected, using original prompt", flush=True)
+
+            # ── Step 2: Get starting frame ──
             source_image = None
-            if source_image_url:
-                print(f"[{jid}] [pipeline] 7a. Fetching source image from URL: {source_image_url[:80]}", flush=True)
+
+            # If real people detected, try to scrape a real photo first
+            if analysis.has_real_people and analysis.image_search_query:
+                print(f"[{jid}] [pipeline] 7b. Searching for real photo via DuckDuckGo...", flush=True)
+                source_image = await search_and_fetch_image(analysis.image_search_query)
+                if source_image:
+                    print(f"[{jid}] [pipeline] ↳ Real photo found ({len(source_image)} bytes) — baked into starting frame", flush=True)
+                else:
+                    print(f"[{jid}] [pipeline] ↳ Image search failed, falling back to other methods", flush=True)
+
+            # Fallback: try the provided source_image_url
+            if not source_image and source_image_url:
+                print(f"[{jid}] [pipeline] 7c. Fetching source image from URL: {source_image_url[:80]}", flush=True)
                 source_image = await fetch_image_from_url(source_image_url)
                 if source_image:
                     print(f"[{jid}] [pipeline] ↳ Source image fetched ({len(source_image)} bytes)", flush=True)
                 else:
-                    print(f"[{jid}] [pipeline] ↳ Source image fetch FAILED, will generate via Gemini", flush=True)
+                    print(f"[{jid}] [pipeline] ↳ Source image fetch FAILED", flush=True)
 
+            # Final fallback: generate via Gemini Imagen (use safe prompt to avoid Imagen blocking too)
             if not source_image:
-                print(f"[{jid}] [pipeline] 7b. Generating starting frame via Gemini Imagen...", flush=True)
+                print(f"[{jid}] [pipeline] 7d. Generating starting frame via Gemini Imagen...", flush=True)
                 image_prompt = create_first_image_prompt(
-                    title=title,
-                    outcome=outcome,
+                    title=veo_title,
+                    outcome=veo_outcome,
                     original_trade_link=original_trade_link,
                 )
                 source_image = await self.vertex_service.generate_starting_frame(image_prompt)
                 if source_image:
                     print(f"[{jid}] [pipeline] ↳ Gemini starting frame generated ({len(source_image)} bytes)", flush=True)
                 else:
-                    raise ValueError("Failed to generate starting frame via Gemini and no source image provided")
+                    raise ValueError("Failed to generate starting frame — all methods exhausted")
 
-            # starting frame -> GCS
+            # ── Step 3: Upload starting frame to GCS ──
             image_uri = ""
             if self.bucket and source_image:
-                print(f"[{jid}] [pipeline] 7c. Uploading starting frame to GCS...", flush=True)
+                print(f"[{jid}] [pipeline] 7e. Uploading starting frame to GCS...", flush=True)
                 image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 1, source_image)
                 print(f"[{jid}] [pipeline] ↳ Uploaded: {image_uri}", flush=True)
 
-            # generate video with prompt and inputs
+            # ── Step 4: Generate video via Veo (always using safe prompt) ──
             print(f"[{jid}] [pipeline] 8. Submitting to Veo for video generation (720p)...", flush=True)
             veo_prompt = create_video_prompt(
-                title=title,
-                outcome=outcome,
+                title=veo_title,
+                outcome=veo_outcome,
                 original_trade_link=original_trade_link,
             )
 
@@ -354,36 +371,6 @@ class JobService:
             print(f"[{jid}] [pipeline] ↳ Job saved with status=processing, polling Veo until done...", flush=True)
 
             status, result_value = await self._submit_and_poll_veo(jid, veo_prompt, source_image)
-
-            # On content policy violation, sanitize prompt and retry once
-            if status == "content_policy":
-                print(f"[{jid}] [pipeline] ↳ Content policy violation, sanitizing prompt and retrying...", flush=True)
-                safe_title, safe_outcome = await sanitize_for_content_policy(title, outcome)
-                print(f"[{jid}] [pipeline] ↳ Sanitized: \"{safe_title}\" / \"{safe_outcome}\"", flush=True)
-
-                # Regenerate starting frame with sanitized prompt
-                print(f"[{jid}] [pipeline] ↳ Regenerating starting frame with sanitized prompt...", flush=True)
-                safe_image_prompt = create_first_image_prompt(
-                    title=safe_title,
-                    outcome=safe_outcome,
-                    original_trade_link=original_trade_link,
-                )
-                safe_source_image = await self.vertex_service.generate_starting_frame(safe_image_prompt)
-                if safe_source_image:
-                    source_image = safe_source_image
-                    print(f"[{jid}] [pipeline] ↳ New starting frame generated ({len(source_image)} bytes)", flush=True)
-                    if self.bucket:
-                        image_uri = await asyncio.to_thread(self._upload_image_sync, job_id, 2, source_image)
-                else:
-                    print(f"[{jid}] [pipeline] ↳ Sanitized image gen failed, reusing original image", flush=True)
-
-                safe_veo_prompt = create_video_prompt(
-                    title=safe_title,
-                    outcome=safe_outcome,
-                    original_trade_link=original_trade_link,
-                )
-                print(f"[{jid}] [pipeline] 8b. Retrying Veo with sanitized prompt...", flush=True)
-                status, result_value = await self._submit_and_poll_veo(jid, safe_veo_prompt, source_image)
 
             if status == "done":
                 video_uri = result_value
@@ -426,6 +413,17 @@ class JobService:
                     "outcome": outcome,
                     "original_trade_link": original_trade_link,
                 })
+                try:
+                    await self.firestore_service.store_generated_video(job_id, {
+                        "status": "error",
+                        "error": error_msg,
+                        "title": title,
+                        "kalshi": job_data.get("kalshi", []),
+                        "trade_side": job_data.get("trade_side", ""),
+                    })
+                    print(f"[{jid}] [pipeline] ↳ Error stored in Firestore — frontend will be notified", flush=True)
+                except Exception as fs_exc:
+                    print(f"[{jid}] [pipeline] ✗ Failed to store error in Firestore: {fs_exc}", flush=True)
 
         except Exception as exc:
             print(f"[{jid}] [pipeline] ✗ ERROR in process_video_job: {exc}", flush=True)
@@ -438,3 +436,14 @@ class JobService:
                 "outcome": job_data.get("outcome") or job_data.get("caption"),
                 "original_trade_link": job_data.get("original_trade_link"),
             })
+            try:
+                await self.firestore_service.store_generated_video(job_id, {
+                    "status": "error",
+                    "error": str(exc),
+                    "title": job_data.get("title", ""),
+                    "kalshi": job_data.get("kalshi", []),
+                    "trade_side": job_data.get("trade_side", ""),
+                })
+                print(f"[{jid}] [pipeline] ↳ Error stored in Firestore — frontend will be notified", flush=True)
+            except Exception as fs_exc:
+                print(f"[{jid}] [pipeline] ✗ Failed to store error in Firestore: {fs_exc}", flush=True)

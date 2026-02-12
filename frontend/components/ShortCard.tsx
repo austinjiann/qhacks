@@ -226,6 +226,9 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
             playsInline
             preload="auto"
             style={{ pointerEvents: 'auto', objectFit: 'cover' }}
+            onError={(e) => {
+              console.error(`[ShortCard] MP4 video failed to load: ${item.video?.type === 'mp4' ? item.video.url : 'unknown'}`, e)
+            }}
           />
         </div>
         {shouldRender && (
@@ -320,9 +323,7 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
 
   return (
     <div className="short-card">
-      <div className="video-container" style={item.youtube.thumbnail ? {
-        background: `url(${item.youtube.thumbnail}) center/cover no-repeat #000`,
-      } : undefined}>
+      <div className="video-container" style={{ background: '#000' }}>
         <iframe
           ref={iframeRef}
           id={iframeId}
@@ -331,7 +332,7 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
           className="video-iframe"
-          style={{ pointerEvents: 'auto' }}
+          style={{ pointerEvents: 'auto', clipPath: 'inset(2% 0 0 0)', top: '3%' }}
           loading={isActive ? 'eager' : 'lazy'}
           onLoad={handleIframeLoad}
         />

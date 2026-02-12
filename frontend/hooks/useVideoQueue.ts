@@ -10,14 +10,19 @@ const BATCH_SIZE = 10
 const PREFETCH_THRESHOLD = 15
 const QUEUE_MAX = 25
 
-export function useVideoQueue() {
+// Module-level so it survives Fast Refresh / remounts
+let _lastKnownIndex = 0
+
+export function useVideoQueue(onGenerationError?: (title: string, error: string) => void) {
   const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [feedError, setFeedError] = useState<string | null>(null)
   const initializedRef = useRef(false)
   const seenVideoIds = useRef<Set<string>>(new Set())
   const fetchingMore = useRef(false)
-  const currentIndexRef = useRef(0)
+  const currentIndexRef = useRef(_lastKnownIndex)
+  const onGenerationErrorRef = useRef(onGenerationError)
+  onGenerationErrorRef.current = onGenerationError
 
   // Load cached results or fetch initial batch on mount
   useEffect(() => {
@@ -53,6 +58,7 @@ export function useVideoQueue() {
 
   const setCurrentIndex = useCallback((index: number) => {
     currentIndexRef.current = index
+    _lastKnownIndex = index
   }, [])
 
   // Request more items when user nears end of feed
@@ -81,7 +87,15 @@ export function useVideoQueue() {
           const video = change.doc.data()
           const jobId = change.doc.id
 
-          console.log(`[pipeline] 10. Firestore snapshot: new video — job_id=${jobId}, url=${video.video_url}`)
+          console.log(`[pipeline] 10. Firestore snapshot: new doc — job_id=${jobId}, status=${video.status || 'ok'}, url=${video.video_url}`)
+
+          // Handle error documents — notify frontend and consume
+          if (video.status === 'error') {
+            console.error(`[pipeline] ✗ Video generation failed: ${video.error}`)
+            onGenerationErrorRef.current?.(video.title || 'Video generation', video.error || 'Unknown error')
+            fetch(`${API_URL}/pool/generated/${jobId}/consume`, { method: 'POST' }).catch(() => {})
+            return
+          }
 
           const injectedItem: FeedItem = {
             id: `generated-${jobId}`,
@@ -97,11 +111,19 @@ export function useVideoQueue() {
               console.log(`[pipeline] ↳ Already in feed, skipping`)
               return prev
             }
-            // Insert right after the current video so it's the NEXT reel
-            const insertAt = currentIndexRef.current + 1
+            // Read the actual scroll position from the DOM — refs can be stale
+            let currentIdx = currentIndexRef.current
+            const container = document.querySelector('.feed-container')
+            if (container) {
+              const itemHeight = container.clientHeight
+              if (itemHeight > 0) {
+                currentIdx = Math.round(container.scrollTop / itemHeight)
+              }
+            }
+            const insertAt = Math.min(currentIdx + 1, prev.length)
             const next = [...prev]
             next.splice(insertAt, 0, injectedItem)
-            console.log(`[pipeline] 11. Video injected after index ${currentIndexRef.current}`)
+            console.log(`[pipeline] 11. Video injected at index ${insertAt} (DOM=${currentIdx}, ref=${currentIndexRef.current}, feed length ${prev.length})`)
             return next
           })
 

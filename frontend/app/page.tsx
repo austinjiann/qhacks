@@ -147,7 +147,15 @@ function SpeechBubble({ text, children, large }: { text?: string; children?: Rea
 }
 
 export default function Home() {
-  const { feedItems, feedError, isProcessing, retryFailed, clearQueue, requestVideoGeneration, removeItem, requestMore, setCurrentIndex } = useVideoQueue()
+  const [tradeConfirmation, setTradeConfirmation] = useState<{ side: 'YES' | 'NO'; message: string } | null>(null)
+  const handleGenerationError = useCallback((title: string, error: string) => {
+    console.error(`[generation] Failed: ${title} — ${error}`)
+    setTradeConfirmation({
+      side: 'NO',
+      message: `Video generation failed — try a different trade!`,
+    })
+  }, [])
+  const { feedItems, feedError, isProcessing, retryFailed, clearQueue, requestVideoGeneration, removeItem, requestMore, setCurrentIndex } = useVideoQueue(handleGenerationError)
   const currentIndexRef = useRef(0)
   const [currentMarkets, setCurrentMarkets] = useState<KalshiMarket[]>([])
   const [selectedIdx, setSelectedIdx] = useState(0)
@@ -161,7 +169,6 @@ export default function Home() {
   const historyFetchInFlight = useRef<Set<string>>(new Set())
   const historyByTickerRef = useRef(historyByTicker)
   const isFeed = stage === 5
-  const [tradeConfirmation, setTradeConfirmation] = useState<{ side: 'YES' | 'NO'; message: string } | null>(null)
   const [currentIsInjected, setCurrentIsInjected] = useState(false)
   const [showTradeInput, setShowTradeInput] = useState<{ side: 'YES' | 'NO' } | null>(null)
   const [tradeAmount, setTradeAmount] = useState('')

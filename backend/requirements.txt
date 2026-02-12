@@ -13,3 +13,4 @@ cryptography
 Pillow
 aiohttp
 firebase-admin
+duckduckgo_search
