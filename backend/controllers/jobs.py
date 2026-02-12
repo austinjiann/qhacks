@@ -20,7 +20,6 @@ class Jobs(APIController):
     def _coerce_payload(self, payload: dict) -> dict:
         return {
             "title": payload.get("title"),
-            # New schema uses "outcome"; keep "caption" as backward-compatible fallback.
             "outcome": payload.get("outcome") or payload.get("caption"),
             "original_trade_link": (
                 payload.get("original_trade_link")

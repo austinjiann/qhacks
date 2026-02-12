@@ -1,8 +1,6 @@
 from blacksheep import Request, json
 from blacksheep.server.controllers import APIController, get, post
-
 from services.feed_service import FeedService
-
 
 class Shorts(APIController):
     def __init__(self, feed_service: FeedService):

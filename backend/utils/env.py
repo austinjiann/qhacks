@@ -1,8 +1,12 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+import os
+import base64
 
 class Settings(BaseSettings):
     KALSHI_API_KEY: str
     KALSHI_PRIVATE_KEY_PATH: str = "./kalshi_private_key.pem"
+    KALSHI_PRIVATE_KEY_BASE64: str | None = None
     OPENAI_API_KEY: str
     YOUTUBE_API_KEY: str
     GOOGLE_CLOUD_PROJECT: str = ""
@@ -19,5 +23,13 @@ class Settings(BaseSettings):
         env_file=".env",
         case_sensitive=True
     )
+    
+    def get_kalshi_private_key(self) -> str:
+        """Get Kalshi private key from either base64 env var or file"""
+        if self.KALSHI_PRIVATE_KEY_BASE64:
+            return base64.b64decode(self.KALSHI_PRIVATE_KEY_BASE64).decode('utf-8')
+        else:
+            with open(self.KALSHI_PRIVATE_KEY_PATH, 'r') as f:
+                return f.read()
 
 settings = Settings()

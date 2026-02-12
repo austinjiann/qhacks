@@ -4,13 +4,12 @@ from typing import Optional, Literal
 
 @dataclass
 class VideoJobRequest:
-    """Request to create a video job"""
     title: str
     outcome: str
     original_trade_link: str
-    source_image_url: Optional[str] = None  # Optional real image to use as base
-    kalshi: Optional[list] = None  # Market data to attach to generated video
-    trade_side: Optional[str] = None  # YES or NO
+    source_image_url: Optional[str] = None
+    kalshi: Optional[list] = None
+    trade_side: Optional[str] = None
 
 @dataclass
 class JobStatus:

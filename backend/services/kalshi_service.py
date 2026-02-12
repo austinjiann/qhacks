@@ -72,8 +72,14 @@ class KalshiService:
         return None
 
     def _load_private_key(self):
-        with open(settings.KALSHI_PRIVATE_KEY_PATH, "rb") as f:
-            return serialization.load_pem_private_key(f.read(), password=None)
+        # Check if we have the base64-encoded key (Cloud Run)
+        if settings.KALSHI_PRIVATE_KEY_BASE64:
+            key_bytes = base64.b64decode(settings.KALSHI_PRIVATE_KEY_BASE64)
+            return serialization.load_pem_private_key(key_bytes, password=None)
+        # Otherwise read from file (local development)
+        else:
+            with open(settings.KALSHI_PRIVATE_KEY_PATH, "rb") as f:
+                return serialization.load_pem_private_key(f.read(), password=None)
 
     def _sign_request(self, method: str, path: str, timestamp_ms: int) -> str:
         message = f"{timestamp_ms}{method}{path}"

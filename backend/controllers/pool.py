@@ -1,8 +1,6 @@
 from blacksheep import json
 from blacksheep.server.controllers import APIController, get, post
-
 from services.firestore_service import FirestoreService
-
 
 class Pool(APIController):
     def __init__(self, firestore_service: FirestoreService):
@@ -19,7 +17,6 @@ class Pool(APIController):
         feed = []
         for item in items:
             video_id = item.get("_doc_id", "")
-            # Strip stale price_history from cached markets so frontend fetches fresh candles
             markets = []
             for m in item.get("kalshi", []):
                 cleaned = {k: v for k, v in m.items() if k != "price_history"}
