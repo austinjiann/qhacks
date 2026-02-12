@@ -22,7 +22,7 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
   const activeIndexRef = useRef(0)
   const onCurrentItemChangeRef = useRef(onCurrentItemChange)
   const onNearEndRef = useRef(onNearEnd)
-  const lastNotifiedVideoRef = useRef<string | undefined>(undefined)
+  const lastNotifiedItemRef = useRef<FeedItem | undefined>(undefined)
   const [activeIndex, setActiveIndex] = useState(0)
   useEffect(() => {
     onCurrentItemChangeRef.current = onCurrentItemChange
@@ -52,7 +52,7 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
     setActiveIndex(index)
     const activeItem = itemsRef.current[index]
     if (activeItem) {
-      lastNotifiedVideoRef.current = activeItem.id
+      lastNotifiedItemRef.current = activeItem
       onCurrentItemChangeRef.current?.(activeItem, index)
     }
     // Trigger fetch more when near end of feed
@@ -97,13 +97,13 @@ const FeedComponent = forwardRef<FeedRef, FeedProps>(function Feed({ items, onCu
   useEffect(() => {
     const activeItem = items[safeActiveIndex]
     if (!activeItem) {
-      lastNotifiedVideoRef.current = undefined
+      lastNotifiedItemRef.current = undefined
       return
     }
-    if (lastNotifiedVideoRef.current === activeItem.id) {
+    if (lastNotifiedItemRef.current === activeItem) {
       return
     }
-    lastNotifiedVideoRef.current = activeItem.id
+    lastNotifiedItemRef.current = activeItem
     onCurrentItemChangeRef.current?.(activeItem, safeActiveIndex)
   }, [items, safeActiveIndex])
 
