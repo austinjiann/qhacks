@@ -1,17 +1,17 @@
-FROM oven/bun:latest
+FROM node:22-slim
 
 WORKDIR /app
 
 COPY package.json bun.lock ./
-RUN bun install
+RUN npm install -g bun && bun install
 
 COPY . .
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
-RUN bun run build
+RUN npx next build
 
 EXPOSE 3000
 
-CMD ["bun", "run", "start"]
+CMD ["npx", "next", "start"]

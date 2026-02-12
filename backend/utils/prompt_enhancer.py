@@ -50,14 +50,6 @@ def _names_leak_check(detected_names: list[str], safe_title: str, safe_outcome: 
     return False
 
 
-_GENERIC_FALLBACK = PromptAnalysis(
-    has_real_people=True,
-    detected_names=[],
-    safe_title="a trending prediction market event",
-    safe_outcome="the predicted outcome happens",
-)
-
-
 async def detect_and_sanitize(title: str, outcome: str) -> PromptAnalysis:
     """Detect real people in the prompt and produce sanitized versions.
 
