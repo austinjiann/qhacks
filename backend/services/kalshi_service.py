@@ -19,6 +19,8 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 
 KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
+_series_image_cache: dict[str, str] = {}
+
 SPORTS_CRYPTO_SERIES = {
     "bitcoin": "KXBTC", "btc": "KXBTC", "crypto": "KXBTC",
     "ethereum": "KXETH", "eth": "KXETH",
@@ -119,6 +121,27 @@ class KalshiService:
         data = await self._kalshi_get(path, f"{KALSHI_BASE_URL}/events", params)
         return data.get("events", [])
 
+    async def get_all_events(self, status: str = "open") -> list[dict]:
+        """Fetch ALL open events with nested markets, paginating via cursor."""
+        all_events: list[dict] = []
+        cursor: str | None = None
+        while True:
+            path = "/trade-api/v2/events"
+            params: dict = {
+                "status": status,
+                "limit": 200,
+                "with_nested_markets": "true",
+            }
+            if cursor:
+                params["cursor"] = cursor
+            data = await self._kalshi_get(path, f"{KALSHI_BASE_URL}/events", params)
+            events = data.get("events", [])
+            all_events.extend(events)
+            cursor = data.get("cursor")
+            if not cursor or not events:
+                break
+        return all_events
+
     async def get_markets_for_event(
         self, event_ticker: str, status: str = "open", limit: int = 50
     ) -> list[dict]:
@@ -157,8 +180,63 @@ class KalshiService:
             return data["event_metadata"]
         return data
 
+    async def find_series_image(self, series_ticker: str) -> str:
+        """Search sibling events in the same series for a non-fallback image."""
+        if series_ticker in _series_image_cache:
+            return _series_image_cache[series_ticker]
+
+        try:
+            markets = await self.get_markets_by_series(series_ticker, limit=20)
+        except Exception:
+            _series_image_cache[series_ticker] = ""
+            return ""
+
+        event_tickers = list(dict.fromkeys(
+            m.get("event_ticker", "") for m in markets if m.get("event_ticker")
+        ))
+
+        def is_fallback(url: str) -> bool:
+            return "structured_icons/" in url
+
+        def to_full_url(path: str) -> str:
+            if not path:
+                return ""
+            if path.startswith("/"):
+                return f"https://kalshi.com{path}"
+            return path
+
+        for event_ticker in event_tickers[:5]:
+            try:
+                metadata = await self.get_event_metadata(event_ticker)
+
+                img = to_full_url(metadata.get("image_url", ""))
+                if img and not is_fallback(img):
+                    print(f"[series_image] Found image for {series_ticker} via {event_ticker}: {img}")
+                    _series_image_cache[series_ticker] = img
+                    return img
+
+                img = to_full_url(metadata.get("featured_image_url", ""))
+                if img and not is_fallback(img):
+                    print(f"[series_image] Found featured image for {series_ticker} via {event_ticker}: {img}")
+                    _series_image_cache[series_ticker] = img
+                    return img
+
+                for md in metadata.get("market_details", []):
+                    img = to_full_url(md.get("image_url", ""))
+                    if img and not is_fallback(img):
+                        print(f"[series_image] Found market detail image for {series_ticker} via {event_ticker}: {img}")
+                        _series_image_cache[series_ticker] = img
+                        return img
+            except Exception:
+                continue
+
+        print(f"[series_image] No image found for series {series_ticker}")
+        _series_image_cache[series_ticker] = ""
+        return ""
+
     async def resolve_market_image(
-        self, event_ticker: str, market_ticker: str, event: dict | None = None
+        self, event_ticker: str, market_ticker: str, event: dict | None = None,
+        series_ticker: str = "",
     ) -> str:
         if not event_ticker:
             return ""
@@ -218,7 +296,12 @@ class KalshiService:
             if img and not best_fallback:
                 best_fallback = img
 
-        return best_fallback
+        if series_ticker:
+            img = await self.find_series_image(series_ticker)
+            if img:
+                return img
+
+        return ""
 
     async def get_candlesticks(
         self,
@@ -293,20 +376,25 @@ class KalshiService:
 
     @classmethod
     def _extract_candle_close_cents(cls, candle: dict) -> Optional[float]:
-        for key in ("price", "yes_bid"):
-            payload = candle.get(key, {})
-            if isinstance(payload, dict):
-                close_cents = cls.to_cents(payload.get("close"), payload.get("close_dollars"))
-                if close_cents is not None:
-                    return close_cents
+        # Primary: use price.close (actual last trade price)
+        # Do NOT fall back to yes_bid — bid prices in thin markets diverge
+        # significantly from the trade price that Kalshi's website displays.
+        price_payload = candle.get("price", {})
+        if isinstance(price_payload, dict):
+            close_cents = cls.to_cents(
+                price_payload.get("close"), price_payload.get("close_dollars")
+            )
+            if close_cents is not None:
+                return close_cents
 
+        # Fallback: previous_price carries forward last known trade price
         synthetic_previous = cls.to_cents(
             candle.get("previous_price"), candle.get("previous_price_dollars")
         )
         if synthetic_previous is not None:
             return synthetic_previous
 
-        price_payload = candle.get("price", {})
+        # Last resort: price.previous
         if isinstance(price_payload, dict):
             previous = cls.to_cents(
                 price_payload.get("previous"), price_payload.get("previous_dollars")

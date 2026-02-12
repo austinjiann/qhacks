@@ -38,6 +38,8 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
   const playerReadyRef = useRef(false)
   const activeStateRef = useRef(isActive)
   const listeningTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  const errorDetectedRef = useRef(false)
+  const blockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const iframeId = useMemo(() => `short-${item.youtube.video_id}`, [item.youtube.video_id])
   const [playerOrigin] = useState(() => (typeof window !== 'undefined' ? window.location.origin : ''))
   const [isMuted, setIsMuted] = useState(globalMuted)
@@ -78,6 +80,15 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
     emitMuteChange()
     postPlayerMessage(globalMuted ? 'mute' : 'unMute')
   }, [postPlayerMessage])
+
+  const handleVideoBlocked = useCallback(() => {
+    if (errorDetectedRef.current) return
+    errorDetectedRef.current = true
+    console.warn(`[ShortCard] Video blocked/unavailable: ${item.youtube.video_id}`)
+    onDelete?.(item.id)
+    const videoId = item.youtube.video_id || item.id
+    fetch(`${API_URL}/pool/feed/${videoId}/delete`, { method: 'POST' }).catch(() => {})
+  }, [item.id, item.youtube.video_id, onDelete])
 
   useEffect(() => {
     activeStateRef.current = isActive
@@ -132,7 +143,7 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
       if (!ALLOWED_ORIGINS.has(event.origin)) {
         return
       }
-      let data: { event?: string; id?: string; info?: { playerState?: number } } | null = null
+      let data: { event?: string; id?: string; info?: { playerState?: number; errorCode?: number } } | null = null
       try {
         data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
       } catch {
@@ -140,10 +151,16 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
       }
       if (data?.event === 'onReady' && data?.id === iframeId) {
         playerReadyRef.current = true
+        errorDetectedRef.current = false
+        if (blockTimeoutRef.current) { clearTimeout(blockTimeoutRef.current); blockTimeoutRef.current = null }
         syncPlayback(activeStateRef.current)
         if (!globalMuted) {
           postPlayerMessage('unMute')
         }
+      }
+      // Detect playback errors: 100=not found, 101/150=embed restricted
+      if (data?.event === 'onError' && data?.id === iframeId) {
+        handleVideoBlocked()
       }
       // When video ends (state 0), restart to prevent end-screen recommendations
       if (data?.event === 'onStateChange' && data?.id === iframeId && data?.info?.playerState === 0) {
@@ -157,9 +174,11 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
       window.removeEventListener('message', handleMessage)
       listeningTimersRef.current.forEach(clearTimeout)
       listeningTimersRef.current = []
+      if (blockTimeoutRef.current) { clearTimeout(blockTimeoutRef.current); blockTimeoutRef.current = null }
       playerReadyRef.current = false
+      errorDetectedRef.current = false
     }
-  }, [iframeId, syncPlayback, postPlayerMessage])
+  }, [iframeId, syncPlayback, postPlayerMessage, handleVideoBlocked])
 
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current
@@ -168,6 +187,7 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
     // Clear any previous retry timers
     listeningTimersRef.current.forEach(clearTimeout)
     listeningTimersRef.current = []
+    if (blockTimeoutRef.current) { clearTimeout(blockTimeoutRef.current); blockTimeoutRef.current = null }
 
     const sendListening = () => {
       iframe.contentWindow?.postMessage(JSON.stringify({
@@ -183,7 +203,14 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
       setTimeout(sendListening, 750),
       setTimeout(sendListening, 2000),
     )
-  }, [iframeId])
+
+    // Timeout: if player never becomes ready and card is active, video is likely blocked
+    blockTimeoutRef.current = setTimeout(() => {
+      if (!playerReadyRef.current && !errorDetectedRef.current && activeStateRef.current) {
+        handleVideoBlocked()
+      }
+    }, 8000)
+  }, [iframeId, handleVideoBlocked])
 
   if (isMp4 && item.video?.type === 'mp4') {
     return (

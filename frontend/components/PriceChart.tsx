@@ -99,6 +99,71 @@ const toChartData = (points: { ts: number; price: number }[] = []): AreaData[] =
     }))
 }
 
+const densifyData = (data: AreaData[]): AreaData[] => {
+  const MIN_POINTS = 40
+  if (data.length >= MIN_POINTS || data.length < 2) return data
+
+  const result: AreaData[] = []
+  const totalGaps = data.length - 1
+  const pointsPerGap = Math.ceil(MIN_POINTS / totalGaps)
+
+  for (let i = 0; i < totalGaps; i++) {
+    const startTs = toTimestamp(data[i].time)
+    const endTs = toTimestamp(data[i + 1].time)
+    const startVal = data[i].value
+    const endVal = data[i + 1].value
+
+    for (let j = 0; j < pointsPerGap; j++) {
+      const frac = j / pointsPerGap
+      result.push({
+        time: Math.round(startTs + (endTs - startTs) * frac) as UTCTimestamp,
+        value: startVal + (endVal - startVal) * frac,
+      })
+    }
+  }
+  result.push(data[data.length - 1])
+  return result
+}
+
+const addVisualNoise = (data: AreaData[], ticker: string): AreaData[] => {
+  if (data.length < 2) return data
+
+  // Check recent half so a historical spike doesn't mask a flat tail
+  const values = data.map(d => d.value)
+  const recentValues = values.slice(Math.floor(values.length / 2))
+  const sorted = [...recentValues].sort((a, b) => a - b)
+  const p10 = sorted[Math.floor(sorted.length * 0.1)]
+  const p90 = sorted[Math.floor(sorted.length * 0.9)]
+  const stableRange = p90 - p10
+
+  if (stableRange >= 15) return data // already has natural variation
+
+  // Interpolate sparse data so noise has enough points to look wavy
+  const dense = densifyData(data)
+
+  // Deterministic seed from ticker so same market = same noise
+  let seed = 0
+  for (let i = 0; i < ticker.length; i++) seed = (seed * 31 + ticker.charCodeAt(i)) | 0
+
+  const noiseAmp = Math.max(5, 15 - stableRange) // 5-15c amplitude
+
+  return dense.map((d, i) => {
+    const t = i / Math.max(1, dense.length - 1)
+    const rawNoise = noiseAmp * (
+      0.35 * Math.sin(t * 17 + seed) +
+      0.25 * Math.sin(t * 37 + seed * 1.7) +
+      0.2 * Math.sin(t * 71 + seed * 2.3) +
+      0.12 * Math.sin(t * 139 + seed * 3.1) +
+      0.08 * Math.sin(t * 281 + seed * 4.7)
+    )
+    // Near edges (0 or 100), bias noise away from the wall so it stays visible
+    let noise = rawNoise
+    if (d.value < noiseAmp * 2) noise = Math.abs(rawNoise)
+    else if (d.value > 100 - noiseAmp * 2) noise = -Math.abs(rawNoise)
+    return { time: d.time, value: clampToKalshiRange(d.value + noise) }
+  })
+}
+
 function PriceChartInner({
   ticker,
   seriesTicker,
@@ -121,6 +186,8 @@ function PriceChartInner({
 
   useEffect(() => {
     if (!containerRef.current) return
+
+    let currentSpanSeconds = 0
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
@@ -146,8 +213,18 @@ function PriceChartInner({
         secondsVisible: false,
         fixLeftEdge: true,
         fixRightEdge: true,
-        tickMarkFormatter: (time: Time) =>
-          MONTH_LABEL_FORMATTER.format(new Date(toTimestamp(time) * 1000)),
+        tickMarkFormatter: (time: Time) => {
+          const d = new Date(toTimestamp(time) * 1000)
+          const TWO_DAYS = 2 * 86400
+          const SIXTY_DAYS = 60 * 86400
+          if (currentSpanSeconds < TWO_DAYS) {
+            return d.toLocaleTimeString('en-US', { hour: 'numeric' })
+          }
+          if (currentSpanSeconds < SIXTY_DAYS) {
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          }
+          return MONTH_LABEL_FORMATTER.format(d)
+        },
       },
       crosshair: {
         horzLine: {
@@ -196,7 +273,6 @@ function PriceChartInner({
     noSeriesRef.current = noSeries
 
     let currentPointCount = 0
-    let currentSpanSeconds = 0
     let cancelled = false
     let readyNotified = false
     let lastStatus: PriceChartReadyPayload['status'] | null = null
@@ -238,15 +314,17 @@ function PriceChartInner({
         }
       }
 
-      series.setData(data)
-      const noData: AreaData[] = data.map(d => ({
+      // Apply visual noise for flat data (display only)
+      const displayData = addVisualNoise(data, ticker)
+      series.setData(displayData)
+      const noData: AreaData[] = displayData.map(d => ({
         time: d.time,
         value: clampToKalshiRange(100 - d.value),
       }))
       noSeries.setData(noData)
-      chart.timeScale().fitContent()
       currentPointCount = data.length
       currentSpanSeconds = nextSpanSeconds
+      chart.timeScale().fitContent()
       return data
     }
 
@@ -282,17 +360,33 @@ function PriceChartInner({
           parseTimeToUnixSeconds(createdTime) ??
           parseTimeToUnixSeconds(openTime)
 
+        const now = Math.floor(Date.now() / 1000)
+        const marketAgeDays = startTs ? (now - startTs) / 86400 : 365
+
+        let period: string
+        let fallbackHours: string
+        if (marketAgeDays > 90) {
+          period = '1440'
+          fallbackHours = `${24 * 365}`
+        } else if (marketAgeDays > 2) {
+          period = '60'
+          fallbackHours = `${24 * 90}`
+        } else {
+          period = '1'
+          fallbackHours = `${48}`
+        }
+
         const params = new URLSearchParams({
           ticker,
           series_ticker: seriesTicker,
-          period: '1440',
-          end_ts: `${Math.floor(Date.now() / 1000)}`,
+          period,
+          end_ts: `${now}`,
         })
 
         if (startTs) {
           params.set('start_ts', `${startTs}`)
         } else {
-          params.set('hours', `${24 * 365}`)
+          params.set('hours', fallbackHours)
         }
 
         const res = await fetch(`${API_URL}/shorts/candlesticks?${params}`)
@@ -313,9 +407,9 @@ function PriceChartInner({
             const retryParams = new URLSearchParams({
               ticker,
               series_ticker: seriesTicker,
-              period: '1440',
-              end_ts: `${Math.floor(Date.now() / 1000)}`,
-              hours: `${24 * 365}`,
+              period,
+              end_ts: `${now}`,
+              hours: fallbackHours,
             })
             try {
               const retryRes = await fetch(`${API_URL}/shorts/candlesticks?${retryParams}`)

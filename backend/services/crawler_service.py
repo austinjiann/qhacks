@@ -10,13 +10,6 @@ from services.youtube_service import YoutubeService
 from utils.env import settings
 
 SEARCH_QUERIES = [
-    # Sports
-    "nfl highlights today",
-    "nba highlights tonight",
-    "mlb highlights today",
-    "nhl highlights today",
-    "super bowl shorts",
-    "soccer goals today shorts",
     # Crypto
     "bitcoin price today shorts",
     "crypto market today shorts",
@@ -83,6 +76,12 @@ class CrawlerService:
                 vid = item.get("id", {}).get("videoId")
                 if vid:
                     video_ids.append(vid)
+
+            # Second-pass: verify embeddability via videos API
+            # (search filter doesn't catch Content ID domain blocks)
+            if video_ids:
+                video_ids = await self.youtube_service.batch_check_embeddable(video_ids)
+
             return video_ids
         except Exception as e:
             print(f"[crawler] YouTube search failed for '{query}': {e}")

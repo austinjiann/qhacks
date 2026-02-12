@@ -30,34 +30,12 @@ QUERIES=(
   # "premier league highlights shorts"
   # "champions league goals shorts"
 
-  # # ── Bitcoin / Crypto ──
-  # "bitcoin price today shorts"
-  # "bitcoin news today shorts"
-  # "crypto market today shorts"
-  # "bitcoin prediction shorts"
-  # "cryptocurrency news shorts"
-  # "crypto crash shorts"
-
-  # # ── Ethereum / XRP / Altcoins ──
-  # "ethereum news today shorts"
-  # "eth price update shorts"
-  # "xrp news today shorts"
-  # "solana news today shorts"
-
-  # # ── Stock Market / Indices ──
-  # "stock market today shorts"
-  # "nasdaq today shorts"
-  # "s&p 500 news shorts"
-  "dow jones today shorts"
-  "wall street news shorts"
-  "market recap today shorts"
-
   # ── Tech / AI ──
-  "ai news today shorts"
-  "chatgpt news shorts"
-  "openai news shorts"
-  "nvidia news today shorts"
-  "apple news today shorts"
+  # "ai news today shorts"
+  # "chatgpt news shorts"
+  # "openai news shorts"
+  # "nvidia news today shorts"
+  # "apple news today shorts"
   "tesla news today shorts"
   "tech news today shorts"
   "silicon valley news shorts"
@@ -65,6 +43,7 @@ QUERIES=(
   # ── Music / Entertainment ──
   "drake new music shorts"
   "kendrick lamar shorts"
+  # ── Music / Entertainment ──
   "travis scott shorts"
   "kanye west news shorts"
   "hip hop news today shorts"
@@ -98,6 +77,8 @@ QUERIES=(
   "extreme weather shorts"
   "hurricane news shorts"
   "wildfire news shorts"
+  "weather report shorts"
+  "snowfall shorts"
 
   # ── Gaming / Internet Culture ──
   "gaming news today shorts"
@@ -105,6 +86,24 @@ QUERIES=(
   "twitch drama shorts"
   "youtube drama shorts"
   "internet drama shorts"
+
+    # ── NFL / Super Bowl ──
+  "nfl highlights today"
+  "super bowl shorts"
+  "nfl best plays this week"
+  "nfl game winning plays"
+
+  # ── NBA ──
+  "nba highlights tonight"
+  "nba best dunks today"
+  "nba buzzer beaters"
+  "nba playoffs shorts"
+
+  # ── MLB / NHL / Soccer ──
+  "mlb highlights today"
+  "nhl highlights today"
+  "premier league highlights shorts"
+  "champions league goals shorts"
 )
 
 echo "Populating feed pool via $API_URL..."

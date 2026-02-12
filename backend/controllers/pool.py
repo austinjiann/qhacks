@@ -19,10 +19,15 @@ class Pool(APIController):
         feed = []
         for item in items:
             video_id = item.get("_doc_id", "")
+            # Strip stale price_history from cached markets so frontend fetches fresh candles
+            markets = []
+            for m in item.get("kalshi", []):
+                cleaned = {k: v for k, v in m.items() if k != "price_history"}
+                markets.append(cleaned)
             feed.append({
                 "id": video_id,
                 "youtube": item.get("youtube", {}),
-                "kalshi": item.get("kalshi", []),
+                "kalshi": markets,
                 "keywords": item.get("keywords", []),
                 "source": item.get("source", ""),
             })

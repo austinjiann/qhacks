@@ -12,6 +12,7 @@ import { useVideoQueue } from '@/hooks/useVideoQueue'
 import PriceChart, { type PriceChartReadyPayload } from '@/components/PriceChart'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 const MAX_PREFETCH_CONCURRENCY = 3
 
 const toUnixSeconds = (value?: string | number | null): number | null => {
@@ -282,14 +283,14 @@ export default function Home() {
           const params = new URLSearchParams({
             ticker: market.ticker,
             series_ticker: market.series_ticker,
-            period: '1440',
+            period: '60',
             end_ts: `${Math.floor(Date.now() / 1000)}`,
           })
           const startTs = resolveMarketStartTs(market)
           if (startTs) {
             params.set('start_ts', `${startTs}`)
           } else {
-            params.set('hours', `${24 * 365}`)
+            params.set('hours', `${24 * 30}`)
           }
           const response = await fetch(`${API_URL}/shorts/candlesticks?${params.toString()}`)
           if (!response.ok || cancelled) {

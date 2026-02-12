@@ -27,6 +27,29 @@ class Admin(APIController):
         count = await self.crawler_service.cleanup_stale(max_age_hours)
         return json({"status": "done", "deactivated": count})
 
+    @post("/purge")
+    async def purge(self):
+        count = await self.firestore_service.purge_all_items()
+        return json({"status": "done", "deleted": count})
+
+    @post("/purge-sports")
+    async def purge_sports(self):
+        sports_keywords = [
+            "nfl", "nba", "mlb", "nhl",
+            "super bowl", "superbowl",
+            "football", "basketball", "baseball", "hockey",
+            "premier league", "champions league", "soccer",
+            "lakers", "celtics", "warriors", "chiefs", "eagles",
+            "patriots", "seahawks",
+        ]
+        count = await self.firestore_service.deactivate_by_keywords(sports_keywords)
+        return json({"status": "done", "deactivated": count})
+
+    @post("/reactivate")
+    async def reactivate(self):
+        count = await self.firestore_service.reactivate_all_items()
+        return json({"status": "done", "reactivated": count})
+
     @post("/seed")
     async def seed(self, video_ids: str = ""):
         ids = [v.strip() for v in video_ids.split(",") if v.strip()]

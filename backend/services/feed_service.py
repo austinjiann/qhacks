@@ -1,5 +1,7 @@
 import asyncio
 import json
+import re
+import time
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -7,6 +9,12 @@ from openai import AsyncOpenAI
 from services.kalshi_service import KalshiService
 from services.youtube_service import YoutubeService
 from utils.env import settings
+
+# Module-level cache for open Kalshi events (survives across scoped FeedService instances)
+_events_cache: list[dict] = []
+_events_cache_ts: float = 0.0
+_EVENTS_CACHE_TTL: float = 300.0  # 5 minutes
+_events_cache_lock: asyncio.Lock | None = None
 
 
 class FeedService:
@@ -76,7 +84,9 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
         event_ticker = event.get("event_ticker", "") or market.get("event_ticker", "")
         ticker = market.get("ticker", "")
         formatted = await self._format_market_display(market, event, keywords)
-        image = await self.kalshi_service.resolve_market_image(event_ticker, ticker, event)
+        image = await self.kalshi_service.resolve_market_image(
+            event_ticker, ticker, event, series_ticker=series_ticker
+        )
 
         market_details: dict = {}
         market_start_ts = self.kalshi_service.get_market_start_ts(market)
@@ -106,15 +116,15 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                 price_history = await self.kalshi_service.get_candlesticks(
                     resolved_series_ticker,
                     ticker,
-                    period_interval=1440,
+                    period_interval=60,
                     start_ts=market_start_ts,
                 )
             elif resolved_series_ticker:
                 price_history = await self.kalshi_service.get_candlesticks(
                     resolved_series_ticker,
                     ticker,
-                    1440,
-                    24 * 365,
+                    60,
+                    24 * 30,
                 )
         except Exception as e:
             print(f"[candlestick] Failed for {ticker}: {e}")
@@ -134,6 +144,80 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
             "image_url": image,
             "price_history": price_history,
         }
+
+    async def _get_cached_events(self) -> list[dict]:
+        """Return cached open events, refreshing if stale (>5 min)."""
+        global _events_cache, _events_cache_ts, _events_cache_lock
+        if _events_cache_lock is None:
+            _events_cache_lock = asyncio.Lock()
+        now = time.monotonic()
+        if _events_cache and (now - _events_cache_ts) < _EVENTS_CACHE_TTL:
+            return _events_cache
+        async with _events_cache_lock:
+            # Double-check after acquiring lock
+            now = time.monotonic()
+            if _events_cache and (now - _events_cache_ts) < _EVENTS_CACHE_TTL:
+                return _events_cache
+            print("[cache] Refreshing Kalshi events cache...")
+            events = await self.kalshi_service.get_all_events()
+            _events_cache = events
+            _events_cache_ts = time.monotonic()
+            print(f"[cache] Cached {len(events)} open events")
+            return _events_cache
+
+    async def _match_event_via_openai(
+        self, keywords: list[str], events: list[dict]
+    ) -> Optional[dict]:
+        """Use GPT-4o-mini to pick the best matching event from a numbered list."""
+        if not events:
+            return None
+
+        lines: list[str] = []
+        for i, event in enumerate(events):
+            title = event.get("title", "Unknown")
+            category = event.get("category", "")
+            suffix = f" [{category}]" if category else ""
+            lines.append(f"{i + 1}. {title}{suffix}")
+
+        event_list_str = "\n".join(lines)
+        keywords_str = ", ".join(keywords)
+
+        prompt = f"""You are matching a YouTube video to a prediction market event.
+
+Video keywords: {keywords_str}
+
+Below is a numbered list of open prediction market events. Pick the ONE event that is most relevant to the video keywords. If no event is even remotely relevant, respond with just the number 0.
+
+Respond with ONLY the number of the best matching event (e.g., "42"). No explanation.
+
+{event_list_str}"""
+
+        try:
+            response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=10,
+            )
+            answer = response.choices[0].message.content.strip()
+            match = re.search(r"\d+", answer)
+            if not match:
+                return None
+            idx = int(match.group()) - 1  # 1-indexed to 0-indexed
+            if idx < 0 or idx >= len(events):
+                return None
+            return events[idx]
+        except Exception as e:
+            print(f"[openai] Event matching failed: {e}")
+            return None
+
+    @staticmethod
+    def _extract_open_markets(event: dict) -> list[dict]:
+        """Extract nested open markets from an event dict."""
+        markets = event.get("markets", [])
+        if not markets:
+            return []
+        return [m for m in markets if m.get("status") == "open"]
 
     async def match_video(self, video_id: str) -> Optional[dict]:
         await self.kalshi_service.ensure_session()
@@ -188,9 +272,56 @@ Return JSON only: {{"question": "...", "outcome": "..."}}"""
                     "keywords": keywords,
                 }
 
-        # No series detected or series had no markets — discard
-        print(f"[{video_id}] SKIPPED: no series match")
-        return None
+        # ── Fallback: semantic matching across all open events ──
+        print(f"[{video_id}] No series match, trying semantic fallback...")
+        try:
+            all_events = await self._get_cached_events()
+            if not all_events:
+                print(f"[{video_id}] SKIPPED: no events available for fallback")
+                return None
+
+            matched_event = await self._match_event_via_openai(keywords, all_events)
+            if not matched_event:
+                print(f"[{video_id}] SKIPPED: no relevant event found")
+                return None
+
+            event_title = matched_event.get("title", "Unknown")
+            event_ticker = matched_event.get("event_ticker", "")
+            print(f"[{video_id}] Semantic match: {event_title} ({event_ticker})")
+
+            markets = self._extract_open_markets(matched_event)
+            if not markets and event_ticker:
+                print(f"[{video_id}] No nested markets, fetching explicitly...")
+                markets = await self.kalshi_service.get_markets_for_event(
+                    event_ticker, limit=50
+                )
+
+            if not markets:
+                print(f"[{video_id}] SKIPPED: matched event has no open markets")
+                return None
+
+            selected = markets[:10]
+            series_ticker = matched_event.get("series_ticker", "")
+            print(f"[{video_id}] SUCCESS (semantic) - {len(selected)} markets from '{event_title}'")
+
+            kalshi_list = await asyncio.gather(*[
+                self._build_market_dict(m, matched_event, series_ticker, keywords)
+                for m in selected
+            ])
+            return {
+                "youtube": {
+                    "video_id": video_id,
+                    "title": metadata["title"],
+                    "thumbnail": metadata["thumbnail"],
+                    "channel": metadata["channel"],
+                    "channel_thumbnail": metadata.get("channel_thumbnail", ""),
+                },
+                "kalshi": list(kalshi_list),
+                "keywords": keywords,
+            }
+        except Exception as e:
+            print(f"[{video_id}] FAILED (semantic fallback): {e}")
+            return None
 
     async def get_feed(self, video_ids: list[str]) -> list[dict]:
         await self.kalshi_service.ensure_session()

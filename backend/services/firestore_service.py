@@ -92,6 +92,37 @@ class FirestoreService:
             count += 1
         return count
 
+    async def reactivate_all_items(self) -> int:
+        query = self.db.collection("feed_pool").where("active", "==", False)
+        docs = await query.get()
+        count = 0
+        for doc in docs:
+            await doc.reference.update({"active": True})
+            count += 1
+        return count
+
+    async def purge_all_items(self) -> int:
+        docs = await self.db.collection("feed_pool").select([]).get()
+        count = 0
+        for doc in docs:
+            await doc.reference.delete()
+            count += 1
+        return count
+
+    async def deactivate_by_keywords(self, match_keywords: list[str]) -> int:
+        """Deactivate all active feed items whose keywords overlap with match_keywords."""
+        match_lower = {k.lower() for k in match_keywords}
+        query = self.db.collection("feed_pool").where("active", "==", True)
+        docs = await query.get()
+        count = 0
+        for doc in docs:
+            data = doc.to_dict() or {}
+            item_keywords = [k.lower() for k in data.get("keywords", [])]
+            if any(k in match_lower for k in item_keywords):
+                await doc.reference.update({"active": False})
+                count += 1
+        return count
+
     async def deactivate_feed_item(self, video_id: str) -> bool:
         ref = self.db.collection("feed_pool").document(video_id)
         doc = await ref.get()
