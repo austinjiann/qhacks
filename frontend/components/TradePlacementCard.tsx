@@ -38,26 +38,40 @@ export default function TradePlacementCard({ market, initialSide, onSubmit, onCl
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-4">
-        {market.image_url && !imgError ? (
-          <Image
-            src={market.image_url}
-            alt=""
-            width={40}
-            height={40}
-            unoptimized
-            className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: 'rgba(16, 185, 129, 0.2)' }}
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-emerald-400">
-              <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/>
-            </svg>
-          </div>
-        )}
+        {(() => {
+          const ticker = (market.series_ticker ?? market.ticker ?? '').toUpperCase()
+          const categoryFallback = (ticker.includes('NBA') || ticker.includes('BASKETBALL')) ? '/basketballfallback.webp' : null
+          if (categoryFallback) return (
+            <Image
+              src={categoryFallback}
+              alt=""
+              width={40}
+              height={40}
+              className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+            />
+          )
+          if (market.image_url && !imgError) return (
+            <Image
+              src={market.image_url}
+              alt=""
+              width={40}
+              height={40}
+              unoptimized
+              className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+              onError={() => setImgError(true)}
+            />
+          )
+          return (
+            <div
+              className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(16, 185, 129, 0.2)' }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-emerald-400">
+                <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/>
+              </svg>
+            </div>
+          )
+        })()}
         <div className="flex-1">
           <p className="text-white/90 text-sm leading-snug line-clamp-2">{market.question}</p>
         </div>

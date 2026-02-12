@@ -146,6 +146,12 @@ function SpeechBubble({ text, children, large }: { text?: string; children?: Rea
   )
 }
 
+function getCategoryFallbackImage(market: KalshiMarket | undefined): string | null {
+  const ticker = (market?.series_ticker ?? market?.ticker ?? '').toUpperCase()
+  if (ticker.includes('NBA') || ticker.includes('BASKETBALL')) return '/basketballfallback.webp'
+  return null
+}
+
 export default function Home() {
   const [tradeConfirmation, setTradeConfirmation] = useState<{ side: 'YES' | 'NO'; message: string } | null>(null)
   const handleGenerationError = useCallback((title: string, error: string) => {
@@ -700,7 +706,15 @@ export default function Home() {
               }}
             >
               <div className="flex items-start gap-3 mb-2">
-                {expandedMarket?.image_url && !imgError ? (
+                {getCategoryFallbackImage(expandedMarket) ? (
+                  <Image
+                    src={getCategoryFallbackImage(expandedMarket)!}
+                    alt=""
+                    width={40}
+                    height={40}
+                    className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                  />
+                ) : expandedMarket?.image_url && !imgError ? (
                   <Image
                     src={expandedMarket.image_url}
                     alt=""
@@ -764,7 +778,15 @@ export default function Home() {
                 }}
               >
                 <div className="flex items-start gap-3 mb-3">
-                  {expandedMarket.image_url && !imgError ? (
+                  {getCategoryFallbackImage(expandedMarket) ? (
+                    <Image
+                      src={getCategoryFallbackImage(expandedMarket)!}
+                      alt=""
+                      width={48}
+                      height={48}
+                      className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                    />
+                  ) : expandedMarket.image_url && !imgError ? (
                     <Image
                       src={expandedMarket.image_url}
                       alt=""
@@ -989,7 +1011,15 @@ export default function Home() {
                   >
                     {/* Market question */}
                     <div className="flex items-start gap-3 mb-4">
-                      {expandedMarket?.image_url && !imgError ? (
+                      {getCategoryFallbackImage(expandedMarket) ? (
+                        <Image
+                          src={getCategoryFallbackImage(expandedMarket)!}
+                          alt=""
+                          width={40}
+                          height={40}
+                          className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                        />
+                      ) : expandedMarket?.image_url && !imgError ? (
                         <Image
                           src={expandedMarket.image_url}
                           alt=""
