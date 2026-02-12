@@ -2,8 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
-import tempfile
 import traceback
 import uuid
 from datetime import datetime
@@ -16,7 +14,6 @@ from services.firestore_service import FirestoreService
 from services.vertex_service import VertexService
 from utils.env import settings
 from utils.gemini_prompt_builder import create_first_image_prompt
-from utils.image_search import search_and_fetch_image
 from utils.prompt_enhancer import detect_and_sanitize
 from utils.veo_prompt_builder import create_video_prompt
 
@@ -304,32 +301,25 @@ class JobService:
                 print(f"[{jid}] [pipeline] ↳ Real people detected! Using safe prompt for Veo", flush=True)
                 print(f"[{jid}] [pipeline] ↳ Safe title: \"{veo_title}\"", flush=True)
                 print(f"[{jid}] [pipeline] ↳ Safe outcome: \"{veo_outcome}\"", flush=True)
-                print(f"[{jid}] [pipeline] ↳ Image search query: \"{analysis.image_search_query}\"", flush=True)
             else:
                 print(f"[{jid}] [pipeline] ↳ No real people detected, using original prompt", flush=True)
 
             # ── Step 2: Get starting frame ──
             source_image = None
 
-            # If real people detected, try to scrape a real photo first
-            if analysis.has_real_people and analysis.image_search_query:
-                print(f"[{jid}] [pipeline] 7b. Searching for real photo via DuckDuckGo...", flush=True)
-                source_image = await search_and_fetch_image(analysis.image_search_query)
-                if source_image:
-                    print(f"[{jid}] [pipeline] ↳ Real photo found ({len(source_image)} bytes) — baked into starting frame", flush=True)
-                else:
-                    print(f"[{jid}] [pipeline] ↳ Image search failed, falling back to other methods", flush=True)
-
-            # Fallback: try the provided source_image_url
-            if not source_image and source_image_url:
+            # Use provided source_image_url ONLY if no real people detected
+            # (Veo's multimodal safety will reject celebrity faces in images)
+            if not analysis.has_real_people and source_image_url:
                 print(f"[{jid}] [pipeline] 7c. Fetching source image from URL: {source_image_url[:80]}", flush=True)
                 source_image = await fetch_image_from_url(source_image_url)
                 if source_image:
                     print(f"[{jid}] [pipeline] ↳ Source image fetched ({len(source_image)} bytes)", flush=True)
                 else:
                     print(f"[{jid}] [pipeline] ↳ Source image fetch FAILED", flush=True)
+            elif analysis.has_real_people and source_image_url:
+                print(f"[{jid}] [pipeline] ↳ Skipping source_image_url (real people detected — would trigger Veo safety)", flush=True)
 
-            # Final fallback: generate via Gemini Imagen (use safe prompt to avoid Imagen blocking too)
+            # Fallback: generate via Gemini Imagen (uses safe prompt so no real faces)
             if not source_image:
                 print(f"[{jid}] [pipeline] 7d. Generating starting frame via Gemini Imagen...", flush=True)
                 image_prompt = create_first_image_prompt(
@@ -352,11 +342,14 @@ class JobService:
 
             # ── Step 4: Generate video via Veo (always using safe prompt) ──
             print(f"[{jid}] [pipeline] 8. Submitting to Veo for video generation (720p)...", flush=True)
+            print(f"[{jid}] [pipeline] ↳ veo_title=\"{veo_title}\"", flush=True)
+            print(f"[{jid}] [pipeline] ↳ veo_outcome=\"{veo_outcome}\"", flush=True)
             veo_prompt = create_video_prompt(
                 title=veo_title,
                 outcome=veo_outcome,
                 original_trade_link=original_trade_link,
             )
+            print(f"[{jid}] [pipeline] ↳ veo_prompt first 200 chars: \"{veo_prompt[:200]}\"", flush=True)
 
             await self._save_job(job_id, {
                 "status": "processing",

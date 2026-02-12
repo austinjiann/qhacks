@@ -1,7 +1,10 @@
 'use client'
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { FeedItem } from '@/types'
+
+const CharacterPreview = dynamic(() => import('@/components/CharacterPreview'), { ssr: false })
 
 const YT_BASE_ORIGIN = 'https://www.youtube.com'
 const ALLOWED_ORIGINS = new Set<string>([YT_BASE_ORIGIN, 'https://www.youtube-nocookie.com'])
@@ -231,6 +234,46 @@ function ShortCard({ item, isActive, shouldRender = true, prefetch = false, onDe
             }}
           />
         </div>
+        {shouldRender && (
+          <div style={{
+            position: 'absolute',
+            bottom: 120,
+            right: -10,
+            zIndex: 20,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            pointerEvents: 'none',
+            animation: 'joePopUp 0.5s ease-out both',
+            animationDelay: '0.8s',
+          }}>
+            <div style={{
+              background: 'rgba(0, 0, 0, 0.8)',
+              backdropFilter: 'blur(8px)',
+              borderRadius: 12,
+              padding: '8px 12px',
+              marginBottom: -10,
+              marginRight: 40,
+              maxWidth: 160,
+            }}>
+              <span style={{
+                color: '#fff',
+                fontSize: 12,
+                fontWeight: 500,
+                fontFamily: 'system-ui, -apple-system, sans-serif',
+                lineHeight: 1.3,
+                display: 'block',
+              }}>
+                Here&apos;s your generated outcome!
+              </span>
+            </div>
+            <CharacterPreview
+              animation="wave"
+              size={{ width: 120, height: 150 }}
+              rotationY={-0.3}
+            />
+          </div>
+        )}
         {shouldRender && (
           <button
             onClick={toggleMute}

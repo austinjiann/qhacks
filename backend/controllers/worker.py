@@ -13,10 +13,6 @@ class Worker(APIController):
     async def health_check(self):
         return json({"status": "ok"})
     
-    @post("/greet")
-    async def greet_user(self, name: str):
-        return {"message": f"Hello, {name}!"}
-
     @post("/process")
     async def process_job(self, data: dict) -> Response:
         # Support queued legacy jobs that still send "caption".

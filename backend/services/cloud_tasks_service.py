@@ -1,8 +1,6 @@
 from google.cloud import tasks_v2
-from google.protobuf import timestamp_pb2
 from utils.env import settings
 import json
-import base64
 
 class CloudTasksService:
     def __init__(self):
@@ -30,20 +28,3 @@ class CloudTasksService:
         response = self.client.create_task(parent=self.queue_path, task=task)
         return response.name
 
-    def enqueue_crawl_job(self, query: str | None = None, max_videos: int = 10) -> str:
-        """Enqueue a crawl job to Cloud Tasks"""
-        payload = {"max_videos": max_videos}
-        if query:
-            payload["query"] = query
-
-        task = {
-            "http_request": {
-                "http_method": tasks_v2.HttpMethod.POST,
-                "url": f"{settings.WORKER_SERVICE_URL}/worker/crawl",
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps(payload).encode(),
-            }
-        }
-
-        response = self.client.create_task(parent=self.queue_path, task=task)
-        return response.name

@@ -124,12 +124,6 @@ class KalshiService:
             headers = self._get_headers("GET", path)
         return {}
 
-    async def get_events(self, status: str = "open", limit: int = 200) -> list[dict]:
-        path = "/trade-api/v2/events"
-        params = {"status": status, "limit": limit, "with_nested_markets": "true"}
-        data = await self._kalshi_get(path, f"{KALSHI_BASE_URL}/events", params)
-        return data.get("events", [])
-
     async def get_all_events(self, status: str = "open") -> list[dict]:
         """Fetch ALL open events with nested markets, paginating via cursor."""
         all_events: list[dict] = []
