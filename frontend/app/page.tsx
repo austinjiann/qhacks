@@ -155,7 +155,7 @@ export default function Home() {
       message: `Video generation failed — try a different trade!`,
     })
   }, [])
-  const { feedItems, feedError, isProcessing, retryFailed, clearQueue, requestVideoGeneration, removeItem, requestMore, setCurrentIndex } = useVideoQueue(handleGenerationError)
+  const { feedItems, feedError, isProcessing, retryFailed, clearQueue, removeItem, requestMore, setCurrentIndex } = useVideoQueue(handleGenerationError)
   const currentIndexRef = useRef(0)
   const [currentMarkets, setCurrentMarkets] = useState<KalshiMarket[]>([])
   const [selectedIdx, setSelectedIdx] = useState(0)
@@ -169,7 +169,6 @@ export default function Home() {
   const historyFetchInFlight = useRef<Set<string>>(new Set())
   const historyByTickerRef = useRef(historyByTicker)
   const isFeed = stage === 5
-  const [currentIsInjected, setCurrentIsInjected] = useState(false)
   const [showTradeInput, setShowTradeInput] = useState<{ side: 'YES' | 'NO' } | null>(null)
   const [tradeAmount, setTradeAmount] = useState('')
   const [adviceLoading, setAdviceLoading] = useState(false)
@@ -434,23 +433,13 @@ export default function Home() {
 
   const handleTrade = useCallback((side: 'YES' | 'NO') => {
     if (!expandedMarket) return
-    console.log(`[pipeline] 1. Trade button pressed: ${side} on ${expandedMarket.ticker}`)
 
-    if (currentIsInjected) {
-      console.log('[pipeline] ↳ Injected reel — showing trade input instead of generating video')
-      setShowTradeInput({ side })
-      setTradeAmount('')
-      return
-    }
-
-    console.log('[pipeline] 2. Requesting video generation...')
-    requestVideoGeneration(expandedMarket, side)
-
+    // Show confirmation animation (no actual video generation)
     setTradeConfirmation({
       side,
-      message: `You traded ${side}! Your video is being generated!`,
+      message: `You traded ${side} on "${expandedMarket.question}"!`,
     })
-  }, [expandedMarket, requestVideoGeneration, currentIsInjected])
+  }, [expandedMarket])
 
   const handleCurrentItemChange = useCallback((item: { kalshi?: KalshiMarket[]; youtube?: { title?: string }; isInjected?: boolean }, index: number) => {
     currentIndexRef.current = index
@@ -479,7 +468,7 @@ export default function Home() {
     setSelectedIdx(bestIdx)
 
     setImgError(false)
-    setCurrentIsInjected(!!item.isInjected)
+
   }, [setCurrentIndex])
 
   const handleChartReady = useCallback(

@@ -1,178 +1,64 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { collection, query, where, onSnapshot } from 'firebase/firestore'
-import { db } from '@/lib/firebase'
+import { useState, useCallback, useRef, useMemo } from 'react'
 import { FeedItem, KalshiMarket } from '@/types'
+import { MYSTERY_FEED } from '@/data/mystery'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const BATCH_SIZE = 10
-const PREFETCH_THRESHOLD = 15
-const QUEUE_MAX = 25
 
 // Module-level so it survives Fast Refresh / remounts
 let _lastKnownIndex = 0
 
-export function useVideoQueue(onGenerationError?: (title: string, error: string) => void) {
-  const [feedItems, setFeedItems] = useState<FeedItem[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [feedError, setFeedError] = useState<string | null>(null)
-  const initializedRef = useRef(false)
-  const seenVideoIds = useRef<Set<string>>(new Set())
-  const fetchingMore = useRef(false)
-  const currentIndexRef = useRef(_lastKnownIndex)
-  const onGenerationErrorRef = useRef(onGenerationError)
-  onGenerationErrorRef.current = onGenerationError
+export function useVideoQueue(_onGenerationError?: (title: string, error: string) => void) {
+  // Serve mystery items in order, cycling when exhausted
+  const nextMysteryIdx = useRef(0)
 
-  // Load cached results or fetch initial batch on mount
-  useEffect(() => {
-    if (initializedRef.current) return
-    initializedRef.current = true
-
-    fetchBatch(BATCH_SIZE)
-  }, [])
-
-  const fetchBatch = useCallback(async (count: number) => {
-    setIsLoading(true)
-    setFeedError(null)
-    try {
-      const excludeParam = seenVideoIds.current.size > 0
-        ? `&exclude=${Array.from(seenVideoIds.current).join(',')}`
-        : ''
-      const res = await fetch(`${API_URL}/pool/feed?count=${count}${excludeParam}`)
-      if (!res.ok) throw new Error('Failed to fetch feed')
-
-      const results: FeedItem[] = await res.json()
-
-      for (const item of results) {
-        if (item.youtube?.video_id) seenVideoIds.current.add(item.youtube.video_id)
-      }
-
-      setFeedItems(prev => [...prev, ...results])
-    } catch (err) {
-      setFeedError(String(err))
-    } finally {
-      setIsLoading(false)
+  const getNextBatch = useCallback((count: number): FeedItem[] => {
+    const batch: FeedItem[] = []
+    for (let i = 0; i < count; i++) {
+      const idx = nextMysteryIdx.current % MYSTERY_FEED.length
+      // Create unique id per cycle so React keys don't collide
+      const cycle = Math.floor(nextMysteryIdx.current / MYSTERY_FEED.length)
+      const item = MYSTERY_FEED[idx]
+      batch.push({
+        ...item,
+        id: cycle > 0 ? `${item.id}--cycle-${cycle}` : item.id,
+      })
+      nextMysteryIdx.current += 1
     }
+    return batch
   }, [])
+
+  const [feedItems, setFeedItems] = useState<FeedItem[]>(() => getNextBatch(BATCH_SIZE))
+  const [isLoading] = useState(false)
+  const [feedError] = useState<string | null>(null)
+  const currentIndexRef = useRef(_lastKnownIndex)
+  const fetchingMore = useRef(false)
 
   const setCurrentIndex = useCallback((index: number) => {
     currentIndexRef.current = index
     _lastKnownIndex = index
   }, [])
 
-  // Request more items when user nears end of feed
-  const requestMore = useCallback((currentIndex?: number) => {
-    if (fetchingMore.current || isLoading) return
-    const idx = currentIndex ?? currentIndexRef.current
-    const unwatched = feedItems.length - idx
-    if (unwatched >= QUEUE_MAX || unwatched > PREFETCH_THRESHOLD) return
-
+  // Append more mystery items when user nears end of feed
+  const requestMore = useCallback((_currentIndex?: number) => {
+    if (fetchingMore.current) return
     fetchingMore.current = true
-    fetchBatch(BATCH_SIZE).finally(() => {
-      fetchingMore.current = false
-    })
-  }, [fetchBatch, isLoading, feedItems.length])
+    const batch = getNextBatch(BATCH_SIZE)
+    setFeedItems(prev => [...prev, ...batch])
+    fetchingMore.current = false
+  }, [getNextBatch])
 
-  // Real-time Firestore listener for generated videos
-  useEffect(() => {
-    const q = query(
-      collection(db, 'generated_videos'),
-      where('consumed', '==', false),
-    )
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      for (const change of snapshot.docChanges()) {
-        if (change.type === 'added') {
-          const video = change.doc.data()
-          const jobId = change.doc.id
-
-          console.log(`[pipeline] 10. Firestore snapshot: new doc — job_id=${jobId}, status=${video.status || 'ok'}, url=${video.video_url}`)
-
-          // Handle error documents — notify frontend and consume
-          if (video.status === 'error') {
-            console.error(`[pipeline] ✗ Video generation failed: ${video.error}`)
-            onGenerationErrorRef.current?.(video.title || 'Video generation', video.error || 'Unknown error')
-            fetch(`${API_URL}/pool/generated/${jobId}/consume`, { method: 'POST' }).catch(() => {})
-            return
-          }
-
-          const injectedItem: FeedItem = {
-            id: `generated-${jobId}`,
-            youtube: { video_id: '', title: video.title || '', thumbnail: '', channel: '' },
-            video: { type: 'mp4', url: video.video_url, title: video.title },
-            kalshi: video.kalshi || [],
-            isInjected: true,
-            injectedByTradeSide: video.trade_side || undefined,
-          }
-
-          setFeedItems(prev => {
-            if (prev.some(item => item.id === injectedItem.id)) {
-              console.log(`[pipeline] ↳ Already in feed, skipping`)
-              return prev
-            }
-            // Read the actual scroll position from the DOM — refs can be stale
-            let currentIdx = currentIndexRef.current
-            const container = document.querySelector('.feed-container')
-            if (container) {
-              const itemHeight = container.clientHeight
-              if (itemHeight > 0) {
-                currentIdx = Math.round(container.scrollTop / itemHeight)
-              }
-            }
-            const insertAt = Math.min(currentIdx + 1, prev.length)
-            const next = [...prev]
-            next.splice(insertAt, 0, injectedItem)
-            console.log(`[pipeline] 11. Video injected at index ${insertAt} (DOM=${currentIdx}, ref=${currentIndexRef.current}, feed length ${prev.length})`)
-            return next
-          })
-
-          // Mark as consumed via backend
-          fetch(`${API_URL}/pool/generated/${jobId}/consume`, { method: 'POST' }).catch(() => {})
-        }
-      }
-    }, (error) => {
-      console.error('[pipeline] Firestore listener error:', error)
-    })
-
-    return () => unsubscribe()
-  }, [])
-
+  // No-op: keep the interface but don't actually generate videos
   const requestVideoGeneration = useCallback(async (
-    market: KalshiMarket,
-    tradeSide: 'YES' | 'NO'
+    _market: KalshiMarket,
+    _tradeSide: 'YES' | 'NO'
   ) => {
-    console.log(`[pipeline] 3. POST /jobs/create — title="${market.question}", side=${tradeSide}`)
-    try {
-      const res = await fetch(`${API_URL}/jobs/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: market.question,
-          outcome: `${tradeSide} - ${market.question}`,
-          original_trade_link: `https://kalshi.com/events/${market.event_ticker || market.ticker}`,
-          source_image_url: market.image_url || undefined,
-          kalshi: [market],
-          trade_side: tradeSide,
-        }),
-      })
-      if (!res.ok) {
-        console.error(`[pipeline] ✗ /jobs/create failed with status ${res.status}`)
-        throw new Error('Failed to queue video generation')
-      }
-      const data = await res.json()
-      console.log(`[pipeline] 4. Job created — job_id=${data.job_id}`)
-      return data.job_id as string
-    } catch (err) {
-      console.error('[pipeline] ✗ Video generation request failed:', err)
-      return null
-    }
+    // Video generation disconnected — animations still play via page.tsx
+    return null
   }, [])
 
-  const retryFailed = useCallback(() => {
-    setFeedError(null)
-    fetchBatch(BATCH_SIZE)
-  }, [fetchBatch])
+  const retryFailed = useCallback(() => {}, [])
 
   const removeItem = useCallback((itemId: string) => {
     setFeedItems(prev => prev.filter(i => i.id !== itemId))
@@ -180,14 +66,14 @@ export function useVideoQueue(onGenerationError?: (title: string, error: string)
 
   const clearQueue = useCallback(() => {
     setFeedItems([])
-    seenVideoIds.current.clear()
+    nextMysteryIdx.current = 0
   }, [])
 
   const stats = useMemo(() => ({
     total: feedItems.length,
     pending: 0,
     processing: 0,
-    matched: feedItems.filter(i => !i.isInjected).length,
+    matched: feedItems.length,
     failed: 0,
   }), [feedItems])
 
