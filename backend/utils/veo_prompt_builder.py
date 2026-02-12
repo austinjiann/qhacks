@@ -164,7 +164,8 @@ IMPLIED SOUND: The specific ambient soundscape of the environment building to th
 
 def create_video_prompt(
     title: str,
-    outcome: str
+    outcome: str,
+    original_trade_link: str
 ) -> str:
     domain_rules = _domain_specific_rules(title=title, outcome=outcome)
     palette = _domain_palette(title=title, outcome=outcome)
