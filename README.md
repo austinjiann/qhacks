@@ -1,4 +1,4 @@
-# Kalship <img src="/frontend/public/kalship-text.png" alt="Logo" height="32">
+# <img src="/frontend/public/kalship-text.png" alt="Logo" height="32">
 
 scroll shorts. trade predictions. that's it.
 
